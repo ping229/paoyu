@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  paoyu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: paoyu
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET:-change-this-secret-key}
+      - ADMIN_DEFAULT_PASSWORD=${ADMIN_DEFAULT_PASSWORD:-admin123456}
+      - CRON_SECRET=${CRON_SECRET:-change-this-cron-secret}
+    volumes:
+      # 持久化数据库
+      - ./data:/app/prisma
+      # 持久化上传文件
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: paoyu-network

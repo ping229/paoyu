@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest *)",
+      "Bash(npm install *)",
+      "Bash(npx prisma *)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(HOSTNAME=0.0.0.0 npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)",
+      "Bash(netstat -tlnp)",
+      "Bash(ufw status *)",
+      "Bash(iptables -L INPUT -n)",
+      "Bash(pkill -f \"next-server\")",
+      "Bash(HOSTNAME=0.0.0.0 PORT=3002 nohup npm run dev)",
+      "Bash(curl -s http://127.0.0.1:3002/)",
+      "Bash(pkill -f \"next\")",
+      "Bash(HOSTNAME=0.0.0.0 PORT=3002 npm run dev)",
+      "Bash(curl -s http://127.0.0.1:3002/login)",
+      "Bash(curl -s http://127.0.0.1:3002/register)",
+      "Bash(curl -s http://127.0.0.1:3002/space)",
+      "Bash(curl -s http://127.0.0.1:3002/public)",
+      "Bash(curl -s http://localhost:3002)",
+      "Bash(grep -r 'prisma.$queryRaw\\\\|prisma.$executeRaw' /opt/paoyu/src '--include=*.ts')",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}

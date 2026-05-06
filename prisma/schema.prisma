@@ -1,0 +1,169 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表
+model User {
+  id                  String              @id @default(uuid()) // 真码
+  username            String              @unique // 用户名
+  passwordHash        String              // 密码哈希
+  intercode           String              @unique // 交互码
+  intercodeUpdatedAt  DateTime            @default(now())
+  createdAt           DateTime            @default(now())
+  isBanned            Boolean             @default(false)
+
+  // 关联
+  sentMessages        MessageSet[]        @relation("SentMessages")
+  receivedMessages    MessageSet[]        @relation("ReceivedMessages")
+  intercodeHistory    IntercodeHistory[]
+  blocksMade          Block[]             @relation("BlockedBy")
+  blocksReceived      Block[]             @relation("BlockedUser")
+  scheduledTasks      ScheduledTask[]
+  reportsMade         Report[]            @relation("Reporter")
+  reportsReceived     Report[]            @relation("Reported")
+  comments            Comment[]
+  likes               Like[]
+}
+
+// 交互码变更历史
+model IntercodeHistory {
+  id          String   @id @default(uuid())
+  userId      String
+  oldCode     String
+  newCode     String
+  changedAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// 信息集
+model MessageSet {
+  id            String    @id @default(uuid())
+  senderId     String
+  receiverId   String
+  createdAt    DateTime  @default(now())
+  isRead       Boolean   @default(false)
+  isDeleted    Boolean   @default(false) // 接收方是否删除
+  isPublic     Boolean   @default(false)
+  publicAt     DateTime? // 公开时间
+  scheduledAt  DateTime? // 定时发送时间
+  isCommentReply Boolean @default(false) // 是否是评论回复通知
+  commentMessageSetId String? // 关联的公共频道信息集ID
+
+  sender       User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver     User      @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  report       Report?
+  comments     Comment[]
+  likes        Like[]
+}
+
+// 单条消息
+model Message {
+  id            String    @id @default(uuid())
+  messageSetId  String
+  type          String    // text, image, voice
+  content       String    // 文字内容或文件路径
+  order         Int       // 顺序
+
+  messageSet    MessageSet @relation(fields: [messageSetId], references: [id], onDelete: Cascade)
+}
+
+// 屏蔽
+model Block {
+  id              String    @id @default(uuid())
+  blockerId       String    // 屏蔽者的真码
+  blockedId       String    // 被屏蔽者的真码
+  messageSetId    String?   // 屏蔽时依据的信息集ID
+  messageSummary  String    // 信息集摘要
+  createdAt       DateTime  @default(now())
+
+  blocker         User      @relation("BlockedBy", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedUser     User      @relation("BlockedUser", fields: [blockedId], references: [id], onDelete: Cascade)
+}
+
+// 定时任务
+model ScheduledTask {
+  id            String    @id @default(uuid())
+  senderId      String
+  receiverId    String?   // 真码，如果是站内发送
+  targetEmail   String?   // 外部邮箱
+  scheduledAt   DateTime
+  isSent        Boolean   @default(false)
+  isPublic      Boolean   @default(false)
+  messageSetId  String?   // 关联的信息集
+
+  sender        User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+// 举报
+model Report {
+  id            String    @id @default(uuid())
+  reporterId    String
+  reportedId    String    // 被举报者真码
+  messageSetId  String    @unique
+  reason        String?
+  status        String    @default("pending") // pending, valid, invalid
+  createdAt     DateTime  @default(now())
+
+  reporter      User      @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported      User      @relation("Reported", fields: [reportedId], references: [id], onDelete: Cascade)
+  messageSet    MessageSet @relation(fields: [messageSetId], references: [id], onDelete: Cascade)
+}
+
+// 评论
+model Comment {
+  id            String    @id @default(uuid())
+  messageSetId  String
+  userId        String
+  content       String
+  replyToId     String?   // 回复的评论ID
+  createdAt     DateTime  @default(now())
+
+  messageSet    MessageSet @relation(fields: [messageSetId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replyTo       Comment?  @relation("CommentReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies       Comment[] @relation("CommentReplies")
+}
+
+// 点赞
+model Like {
+  id            String    @id @default(uuid())
+  messageSetId  String
+  userId        String
+  createdAt     DateTime  @default(now())
+
+  messageSet    MessageSet @relation(fields: [messageSetId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageSetId, userId]) // 每个用户对每个信息集只能点赞一次
+}
+
+// 管理员
+model Admin {
+  id            String    @id @default(uuid())
+  username      String    @unique
+  passwordHash  String
+  createdAt     DateTime  @default(now())
+  logs          AdminLog[]
+}
+
+// 管理员操作日志
+model AdminLog {
+  id          String    @id @default(uuid())
+  adminId     String
+  action      String    // 操作类型
+  targetId    String?   // 目标ID
+  details     String?   // 详细信息
+  createdAt   DateTime  @default(now())
+
+  admin       Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+}

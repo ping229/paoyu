@@ -1,0 +1,46 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build output
+.next
+out
+build
+
+# Development
+*.log
+npm-debug.log*
+.env.local
+.env.development.local
+.env.test.local
+
+# Database
+*.db
+*.db-journal
+prisma/dev.db
+
+# Uploads (will be mounted as volume)
+uploads
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Other
+README.md
+CLAUDE.md
+AGENTS.md
+*.md
