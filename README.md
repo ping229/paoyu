@@ -22,8 +22,15 @@
 ### 开发环境
 
 ```bash
+# 克隆仓库
+git clone https://github.com/ping229/paoyu.git
+cd paoyu
+
 # 安装依赖
 npm install
+
+# 创建环境变量文件
+cp .env.example .env
 
 # 生成Prisma Client
 npx prisma generate
