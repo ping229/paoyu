@@ -31,7 +31,9 @@
       "Bash(git push *)",
       "Bash(awk '{print $NF}')",
       "WebFetch(domain:www.hi2future.com)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(curl *)",
+      "Bash(python3 -c \"from datetime import datetime, timedelta; print\\(\\(datetime.utcnow\\(\\) + timedelta\\(minutes=1\\)\\).strftime\\('%Y-%m-%dT%H:%M:%S.000Z'\\)\\)\")"
     ]
   }
 }

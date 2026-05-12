@@ -189,7 +189,11 @@ model TimeMail {
   scheduledAt   DateTime  // 预定发送时间
   isSent        Boolean   @default(false)
   sentAt        DateTime? // 实际发送时间
+  retryCount    Int       @default(0) // 重试次数
+  lastError     String?   // 最后一次错误信息
   createdAt     DateTime  @default(now())
 
   sender        User?     @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([isSent, scheduledAt]) // 优化查询：未发送且到期的邮件
 }
