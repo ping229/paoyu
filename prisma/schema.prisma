@@ -31,6 +31,7 @@ model User {
   reportsReceived     Report[]            @relation("Reported")
   comments            Comment[]
   likes               Like[]
+  timeMails           TimeMail[]
 }
 
 // 交互码变更历史
@@ -166,4 +167,29 @@ model AdminLog {
   createdAt   DateTime  @default(now())
 
   admin       Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+}
+
+// 系统配置
+model SystemConfig {
+  id            String    @id @default(uuid())
+  key           String    @unique
+  value         String
+  updatedAt     DateTime  @updatedAt
+}
+
+// 时光邮件
+model TimeMail {
+  id            String    @id @default(uuid())
+  senderId      String?   // 发送者ID（登录用户）
+  senderName    String    // 发送者显示名称
+  senderEmail   String?   // 发送者邮箱（可选，用于回复）
+  toEmail       String    // 收件人邮箱
+  subject       String    // 邮件主题
+  content       String    // 邮件内容
+  scheduledAt   DateTime  // 预定发送时间
+  isSent        Boolean   @default(false)
+  sentAt        DateTime? // 实际发送时间
+  createdAt     DateTime  @default(now())
+
+  sender        User?     @relation(fields: [senderId], references: [id], onDelete: SetNull)
 }

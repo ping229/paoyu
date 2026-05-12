@@ -75,6 +75,18 @@ export default function AdminDashboard() {
   const [publicMessagesTotal, setPublicMessagesTotal] = useState(0);
   const [publicMessagesLoading, setPublicMessagesLoading] = useState(false);
 
+  // 邮件配置
+  const [emailConfig, setEmailConfig] = useState({
+    smtp_host: "",
+    smtp_port: "",
+    smtp_user: "",
+    smtp_pass: "",
+    sender_name: "泡语",
+    sender_email: "",
+  });
+  const [emailConfigLoading, setEmailConfigLoading] = useState(false);
+  const [emailConfigMessage, setEmailConfigMessage] = useState("");
+
   useEffect(() => {
     const token = localStorage.getItem("adminToken");
     if (!token) {
@@ -416,6 +428,62 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchEmailConfig = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/email-config", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setEmailConfig({
+          smtp_host: data.data.smtp_host || "",
+          smtp_port: data.data.smtp_port || "",
+          smtp_user: data.data.smtp_user || "",
+          smtp_pass: data.data.smtp_pass || "",
+          sender_name: data.data.sender_name || "泡语",
+          sender_email: data.data.sender_email || "",
+        });
+      }
+    } catch (error) {
+      console.error("Fetch email config error:", error);
+    }
+  };
+
+  const handleSaveEmailConfig = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    setEmailConfigLoading(true);
+    setEmailConfigMessage("");
+
+    try {
+      const res = await fetch("/api/admin/email-config", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(emailConfig),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setEmailConfigMessage("配置已保存");
+      } else {
+        setEmailConfigMessage(data.error || "保存失败");
+      }
+    } catch (error) {
+      console.error("Save email config error:", error);
+      setEmailConfigMessage("保存失败");
+    } finally {
+      setEmailConfigLoading(false);
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("adminToken");
     router.push("/admin/login");
@@ -532,6 +600,19 @@ export default function AdminDashboard() {
             }`}
           >
             公共频道管理
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab("emailConfig");
+              fetchEmailConfig();
+            }}
+            className={`pb-2 px-2 whitespace-nowrap ${
+              activeTab === "emailConfig"
+                ? "text-purple-400 border-b-2 border-purple-400"
+                : "text-gray-400"
+            }`}
+          >
+            邮件配置
           </button>
         </div>
 
@@ -967,6 +1048,99 @@ export default function AdminDashboard() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Email Config Tab */}
+        {activeTab === "emailConfig" && (
+          <div className="max-w-2xl">
+            <h2 className="text-lg font-medium text-gray-200 mb-4">邮件服务配置</h2>
+            <p className="text-gray-400 text-sm mb-6">
+              配置SMTP邮件服务，用于发送时光邮件。推荐使用阿里云邮件、腾讯企业邮箱或Resend等服务。
+            </p>
+
+            <div className="space-y-4">
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                <label className="block text-gray-400 text-sm mb-2">SMTP服务器地址</label>
+                <input
+                  type="text"
+                  value={emailConfig.smtp_host}
+                  onChange={(e) => setEmailConfig({ ...emailConfig, smtp_host: e.target.value })}
+                  placeholder="smtp.example.com"
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                <label className="block text-gray-400 text-sm mb-2">SMTP端口</label>
+                <input
+                  type="text"
+                  value={emailConfig.smtp_port}
+                  onChange={(e) => setEmailConfig({ ...emailConfig, smtp_port: e.target.value })}
+                  placeholder="465"
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                <label className="block text-gray-400 text-sm mb-2">SMTP用户名</label>
+                <input
+                  type="text"
+                  value={emailConfig.smtp_user}
+                  onChange={(e) => setEmailConfig({ ...emailConfig, smtp_user: e.target.value })}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                <label className="block text-gray-400 text-sm mb-2">SMTP密码/授权码</label>
+                <input
+                  type="password"
+                  value={emailConfig.smtp_pass}
+                  onChange={(e) => setEmailConfig({ ...emailConfig, smtp_pass: e.target.value })}
+                  placeholder="••••••••"
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                <label className="block text-gray-400 text-sm mb-2">发件人名称</label>
+                <input
+                  type="text"
+                  value={emailConfig.sender_name}
+                  onChange={(e) => setEmailConfig({ ...emailConfig, sender_name: e.target.value })}
+                  placeholder="泡语"
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                <label className="block text-gray-400 text-sm mb-2">发件人邮箱</label>
+                <input
+                  type="email"
+                  value={emailConfig.sender_email}
+                  onChange={(e) => setEmailConfig({ ...emailConfig, sender_email: e.target.value })}
+                  placeholder="noreply@yourdomain.com"
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+                <p className="text-gray-500 text-xs mt-1">这是收件人看到的发件人地址</p>
+              </div>
+
+              {emailConfigMessage && (
+                <p className={emailConfigMessage.includes("已保存") ? "text-green-400 text-sm" : "text-red-400 text-sm"}>
+                  {emailConfigMessage}
+                </p>
+              )}
+
+              <button
+                onClick={handleSaveEmailConfig}
+                disabled={emailConfigLoading}
+                className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-medium rounded-lg transition-colors"
+              >
+                {emailConfigLoading ? "保存中..." : "保存配置"}
+              </button>
+            </div>
           </div>
         )}
 

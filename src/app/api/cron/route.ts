@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getEmailConfig, sendTimeMail } from '@/lib/email'
 
 // 这个端点应该由外部cron服务定期调用
 // 或者可以使用Vercel Cron Jobs
@@ -15,24 +16,20 @@ export async function GET(request: NextRequest) {
     }
 
     const now = new Date()
+    const results = []
 
-    // 查找到期的定时任务
+    // 1. 处理泡泡定时任务
     const dueTasks = await prisma.scheduledTask.findMany({
       where: {
         isSent: false,
-        scheduledAt: {
-          lte: now
-        }
+        scheduledAt: { lte: now }
       }
     })
-
-    const results = []
 
     for (const task of dueTasks) {
       try {
         // 站内发送
         if (task.receiverId) {
-          // 更新关联的信息集
           await prisma.messageSet.updateMany({
             where: {
               senderId: task.senderId,
@@ -45,22 +42,56 @@ export async function GET(request: NextRequest) {
           })
         }
 
-        // 外部邮箱发送（这里可以集成邮件服务）
-        if (task.targetEmail) {
-          // TODO: 集成邮件发送服务
-          // await sendEmail(task.targetEmail, ...)
-        }
-
-        // 标记任务已完成
         await prisma.scheduledTask.update({
           where: { id: task.id },
           data: { isSent: true }
         })
 
-        results.push({ taskId: task.id, status: 'completed' })
+        results.push({ taskId: task.id, type: 'bubble', status: 'completed' })
       } catch (error) {
         console.error(`Task ${task.id} failed:`, error)
-        results.push({ taskId: task.id, status: 'failed' })
+        results.push({ taskId: task.id, type: 'bubble', status: 'failed' })
+      }
+    }
+
+    // 2. 处理时光邮件
+    const emailConfig = await getEmailConfig()
+
+    if (emailConfig) {
+      const dueMails = await prisma.timeMail.findMany({
+        where: {
+          isSent: false,
+          scheduledAt: { lte: now }
+        }
+      })
+
+      for (const mail of dueMails) {
+        try {
+          const result = await sendTimeMail(
+            mail.toEmail,
+            mail.subject,
+            mail.content,
+            mail.senderName,
+            emailConfig
+          )
+
+          if (result.success) {
+            await prisma.timeMail.update({
+              where: { id: mail.id },
+              data: {
+                isSent: true,
+                sentAt: now
+              }
+            })
+            results.push({ taskId: mail.id, type: 'timeMail', status: 'completed' })
+          } else {
+            console.error(`Send mail ${mail.id} failed:`, result.error)
+            results.push({ taskId: mail.id, type: 'timeMail', status: 'failed', error: result.error })
+          }
+        } catch (error) {
+          console.error(`Send mail ${mail.id} error:`, error)
+          results.push({ taskId: mail.id, type: 'timeMail', status: 'failed' })
+        }
       }
     }
 
