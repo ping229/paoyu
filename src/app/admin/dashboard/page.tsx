@@ -44,6 +44,20 @@ interface DraftMessage {
   content: string;
 }
 
+interface TimeMail {
+  id: string;
+  senderName: string;
+  toEmail: string;
+  subject: string;
+  content: string;
+  scheduledAt: string;
+  isSent: boolean;
+  sentAt: string | null;
+  retryCount: number;
+  lastError: string | null;
+  createdAt: string;
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
@@ -86,6 +100,14 @@ export default function AdminDashboard() {
   });
   const [emailConfigLoading, setEmailConfigLoading] = useState(false);
   const [emailConfigMessage, setEmailConfigMessage] = useState("");
+
+  // 时光邮件管理
+  const [timeMails, setTimeMails] = useState<TimeMail[]>([]);
+  const [timeMailsPage, setTimeMailsPage] = useState(1);
+  const [timeMailsTotal, setTimeMailsTotal] = useState(0);
+  const [timeMailsStatus, setTimeMailsStatus] = useState("all");
+  const [timeMailsLoading, setTimeMailsLoading] = useState(false);
+  const [timeMailsStats, setTimeMailsStats] = useState({ pending: 0, sent: 0, failed: 0, total: 0 });
 
   useEffect(() => {
     const token = localStorage.getItem("adminToken");
@@ -484,6 +506,79 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchTimeMails = async (page: number = 1, status: string = "all") => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    setTimeMailsLoading(true);
+
+    try {
+      const res = await fetch(`/api/admin/time-mails?page=${page}&status=${status}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setTimeMails(data.data.mails);
+        setTimeMailsPage(data.data.page);
+        setTimeMailsTotal(data.data.total);
+        setTimeMailsStats(data.data.stats);
+      }
+    } catch (error) {
+      console.error("Fetch time mails error:", error);
+    } finally {
+      setTimeMailsLoading(false);
+    }
+  };
+
+  const handleCopyMailInfo = (mail: TimeMail) => {
+    const info = `收件人: ${mail.toEmail}\n主题: ${mail.subject}\n\n内容:\n${mail.content}`;
+    navigator.clipboard.writeText(info).then(() => {
+      alert("已复制到剪贴板！");
+    }).catch(() => {
+      // 备用方案
+      const textarea = document.createElement("textarea");
+      textarea.value = info;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      alert("已复制到剪贴板！");
+    });
+  };
+
+  const handleMarkAsResent = async (mailId: string) => {
+    if (!confirm("确定要将此邮件标记为「外部平台成功补发」吗？")) return;
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/time-mails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: mailId,
+          isSent: true,
+          lastError: null,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        fetchTimeMails(timeMailsPage, timeMailsStatus);
+      } else {
+        alert(data.error || "更新失败");
+      }
+    } catch (error) {
+      console.error("Update mail error:", error);
+      alert("更新失败");
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("adminToken");
     router.push("/admin/login");
@@ -613,6 +708,19 @@ export default function AdminDashboard() {
             }`}
           >
             邮件配置
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab("timeMails");
+              fetchTimeMails(1, "all");
+            }}
+            className={`pb-2 px-2 whitespace-nowrap ${
+              activeTab === "timeMails"
+                ? "text-purple-400 border-b-2 border-purple-400"
+                : "text-gray-400"
+            }`}
+          >
+            时光邮件管理
           </button>
         </div>
 
@@ -1141,6 +1249,151 @@ export default function AdminDashboard() {
                 {emailConfigLoading ? "保存中..." : "保存配置"}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Time Mails Management Tab */}
+        {activeTab === "timeMails" && (
+          <div className="space-y-4">
+            {/* Stats */}
+            <div className="grid grid-cols-4 gap-4">
+              <button
+                onClick={() => { setTimeMailsStatus("all"); fetchTimeMails(1, "all"); }}
+                className={`p-4 rounded-lg border ${timeMailsStatus === "all" ? "bg-purple-600/20 border-purple-500" : "bg-gray-900/50 border-gray-800"}`}
+              >
+                <p className="text-gray-400 text-sm">全部</p>
+                <p className="text-2xl font-bold text-purple-400">{timeMailsStats.total}</p>
+              </button>
+              <button
+                onClick={() => { setTimeMailsStatus("pending"); fetchTimeMails(1, "pending"); }}
+                className={`p-4 rounded-lg border ${timeMailsStatus === "pending" ? "bg-yellow-600/20 border-yellow-500" : "bg-gray-900/50 border-gray-800"}`}
+              >
+                <p className="text-gray-400 text-sm">待发送</p>
+                <p className="text-2xl font-bold text-yellow-400">{timeMailsStats.pending}</p>
+              </button>
+              <button
+                onClick={() => { setTimeMailsStatus("sent"); fetchTimeMails(1, "sent"); }}
+                className={`p-4 rounded-lg border ${timeMailsStatus === "sent" ? "bg-green-600/20 border-green-500" : "bg-gray-900/50 border-gray-800"}`}
+              >
+                <p className="text-gray-400 text-sm">已发送</p>
+                <p className="text-2xl font-bold text-green-400">{timeMailsStats.sent}</p>
+              </button>
+              <button
+                onClick={() => { setTimeMailsStatus("failed"); fetchTimeMails(1, "failed"); }}
+                className={`p-4 rounded-lg border ${timeMailsStatus === "failed" ? "bg-red-600/20 border-red-500" : "bg-gray-900/50 border-gray-800"}`}
+              >
+                <p className="text-gray-400 text-sm">发送失败</p>
+                <p className="text-2xl font-bold text-red-400">{timeMailsStats.failed}</p>
+              </button>
+            </div>
+
+            {timeMailsLoading ? (
+              <div className="text-gray-400 text-center py-12">加载中...</div>
+            ) : timeMails.length === 0 ? (
+              <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
+                暂无邮件
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {timeMails.map((mail) => (
+                  <div
+                    key={mail.id}
+                    className="bg-gray-900/50 border border-gray-800 rounded-lg p-4"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`px-2 py-0.5 rounded text-xs ${
+                            !mail.isSent
+                              ? "bg-yellow-600/20 text-yellow-400"
+                              : mail.lastError
+                                ? "bg-red-600/20 text-red-400"
+                                : "bg-green-600/20 text-green-400"
+                          }`}>
+                            {!mail.isSent ? "待发送" : mail.lastError ? "发送失败" : "已发送"}
+                          </span>
+                          {mail.retryCount > 0 && (
+                            <span className="text-gray-500 text-xs">重试 {mail.retryCount} 次</span>
+                          )}
+                        </div>
+                        <p className="text-gray-200 font-medium">{mail.subject}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                      <div>
+                        <p className="text-gray-500">发送者</p>
+                        <p className="text-gray-300">{mail.senderName}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">收件人</p>
+                        <p className="text-gray-300">{mail.toEmail}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">创建时间</p>
+                        <p className="text-gray-400">{new Date(mail.createdAt).toLocaleString("zh-CN")}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">定时发送时间</p>
+                        <p className="text-gray-400">{new Date(mail.scheduledAt).toLocaleString("zh-CN")}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-800/50 rounded-lg p-3 mb-3">
+                      <p className="text-gray-500 text-xs mb-1">邮件内容</p>
+                      <p className="text-gray-300 text-sm whitespace-pre-wrap line-clamp-3">{mail.content}</p>
+                    </div>
+
+                    {mail.lastError && (
+                      <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-3 mb-3">
+                        <p className="text-red-400 text-xs mb-1">错误信息</p>
+                        <p className="text-red-300 text-sm">{mail.lastError}</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleCopyMailInfo(mail)}
+                        className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-sm"
+                      >
+                        复制邮件信息
+                      </button>
+                      {mail.lastError && mail.isSent && (
+                        <button
+                          onClick={() => handleMarkAsResent(mail.id)}
+                          className="px-3 py-1.5 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded text-sm"
+                        >
+                          标记为已补发
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Pagination */}
+                {timeMailsTotal > 20 && (
+                  <div className="flex justify-center gap-2 mt-6">
+                    <button
+                      onClick={() => fetchTimeMails(timeMailsPage - 1, timeMailsStatus)}
+                      disabled={timeMailsPage <= 1}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                    >
+                      上一页
+                    </button>
+                    <span className="px-4 py-2 text-gray-400 text-sm">
+                      第 {timeMailsPage} 页 / 共 {Math.ceil(timeMailsTotal / 20)} 页
+                    </span>
+                    <button
+                      onClick={() => fetchTimeMails(timeMailsPage + 1, timeMailsStatus)}
+                      disabled={timeMailsPage >= Math.ceil(timeMailsTotal / 20)}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
