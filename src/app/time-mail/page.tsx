@@ -26,6 +26,7 @@ export default function TimeMailPage() {
   const [subject, setSubject] = useState("");
   const [content, setContent] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [isPublic, setIsPublic] = useState(true);
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -84,6 +85,7 @@ export default function TimeMailPage() {
           subject,
           content,
           scheduledAt,
+          isPublic,
         }),
       });
 
@@ -258,6 +260,24 @@ export default function TimeMailPage() {
                 className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-purple-500"
               />
               <p className="text-gray-500 text-xs mt-1">最早30分钟后发送</p>
+            </div>
+
+            {/* 公开设置 */}
+            <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isPublic}
+                  onChange={(e) => setIsPublic(e.target.checked)}
+                  className="rounded text-purple-500"
+                />
+                <div>
+                  <p className="text-gray-200">公开到公共频道</p>
+                  <p className="text-gray-500 text-xs">
+                    公开的邮件将在发送成功后或创建满一个月后显示在公共频道
+                  </p>
+                </div>
+              </label>
             </div>
 
             {message && (

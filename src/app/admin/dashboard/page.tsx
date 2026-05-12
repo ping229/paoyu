@@ -46,16 +46,20 @@ interface DraftMessage {
 
 interface TimeMail {
   id: string;
+  senderId: string | null;
   senderName: string;
   toEmail: string;
   subject: string;
   content: string;
   scheduledAt: string;
+  status: string;
   isSent: boolean;
   sentAt: string | null;
   retryCount: number;
   lastError: string | null;
   createdAt: string;
+  deletedAt: string | null;
+  deleteReason: string | null;
 }
 
 export default function AdminDashboard() {
@@ -107,7 +111,18 @@ export default function AdminDashboard() {
   const [timeMailsTotal, setTimeMailsTotal] = useState(0);
   const [timeMailsStatus, setTimeMailsStatus] = useState("all");
   const [timeMailsLoading, setTimeMailsLoading] = useState(false);
-  const [timeMailsStats, setTimeMailsStats] = useState({ pending: 0, sent: 0, failed: 0, total: 0 });
+  const [timeMailsStats, setTimeMailsStats] = useState({ pending: 0, approved: 0, rejected: 0, sent: 0, failed: 0, resent: 0, total: 0 });
+  const [timeMailsSearch, setTimeMailsSearch] = useState("");
+  const [selectedMails, setSelectedMails] = useState<Set<string>>(new Set());
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [timeMailSubTab, setTimeMailSubTab] = useState("list"); // list, review, settings
+
+  // 监管设置
+  const [moderationMode, setModerationMode] = useState("none");
+  const [moderationKeywords, setModerationKeywords] = useState<string[]>([]);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [moderationLoading, setModerationLoading] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("adminToken");
@@ -506,14 +521,20 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchTimeMails = async (page: number = 1, status: string = "all") => {
+  // 时光邮件管理函数
+  const fetchTimeMails = async (page: number = 1, status: string = "all", search: string = "") => {
     const token = localStorage.getItem("adminToken");
     if (!token) return;
 
     setTimeMailsLoading(true);
 
     try {
-      const res = await fetch(`/api/admin/time-mails?page=${page}&status=${status}`, {
+      let url = `/api/admin/time-mails?page=${page}&status=${status}`;
+      if (search) {
+        url += `&search=${encodeURIComponent(search)}`;
+      }
+
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -531,12 +552,77 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchModerationSettings = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/time-mails/settings", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setModerationMode(data.data.mode);
+        setModerationKeywords(data.data.keywords);
+      }
+    } catch (error) {
+      console.error("Fetch moderation settings error:", error);
+    }
+  };
+
+  const handleSaveModerationSettings = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    setModerationLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/time-mails/settings", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mode: moderationMode,
+          keywords: moderationKeywords
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        alert("设置已保存");
+      } else {
+        alert(data.error || "保存失败");
+      }
+    } catch (error) {
+      console.error("Save moderation settings error:", error);
+      alert("保存失败");
+    } finally {
+      setModerationLoading(false);
+    }
+  };
+
+  const addKeyword = () => {
+    if (!newKeyword.trim()) return;
+    if (moderationKeywords.includes(newKeyword.trim())) {
+      alert("关键词已存在");
+      return;
+    }
+    setModerationKeywords([...moderationKeywords, newKeyword.trim()]);
+    setNewKeyword("");
+  };
+
+  const removeKeyword = (keyword: string) => {
+    setModerationKeywords(moderationKeywords.filter(k => k !== keyword));
+  };
+
   const handleCopyMailInfo = (mail: TimeMail) => {
     const info = `收件人: ${mail.toEmail}\n主题: ${mail.subject}\n\n内容:\n${mail.content}`;
     navigator.clipboard.writeText(info).then(() => {
       alert("已复制到剪贴板！");
     }).catch(() => {
-      // 备用方案
       const textarea = document.createElement("textarea");
       textarea.value = info;
       document.body.appendChild(textarea);
@@ -562,20 +648,164 @@ export default function AdminDashboard() {
         },
         body: JSON.stringify({
           id: mailId,
-          isSent: true,
+          status: "resent",
           lastError: null,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
-        fetchTimeMails(timeMailsPage, timeMailsStatus);
+        fetchTimeMails(timeMailsPage, timeMailsStatus, timeMailsSearch);
       } else {
         alert(data.error || "更新失败");
       }
     } catch (error) {
       console.error("Update mail error:", error);
       alert("更新失败");
+    }
+  };
+
+  const handleDeleteMail = async (mailId: string) => {
+    setDeleteReason("");
+    setDeleteModalOpen(true);
+
+    // 存储要删除的邮件ID
+    (window as any).pendingDeleteId = mailId;
+  };
+
+  const confirmDeleteMail = async () => {
+    const mailId = (window as any).pendingDeleteId;
+    if (!mailId) return;
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`/api/admin/time-mails?id=${mailId}&deleteReason=${encodeURIComponent(deleteReason || "管理员删除")}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        fetchTimeMails(timeMailsPage, timeMailsStatus, timeMailsSearch);
+        setDeleteModalOpen(false);
+        alert("删除成功");
+      } else {
+        alert(data.error || "删除失败");
+      }
+    } catch (error) {
+      console.error("Delete mail error:", error);
+      alert("删除失败");
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedMails.size === 0) {
+      alert("请先选择要删除的邮件");
+      return;
+    }
+
+    setDeleteReason("");
+    setDeleteModalOpen(true);
+  };
+
+  const confirmBatchDelete = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/time-mails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "delete",
+          ids: Array.from(selectedMails),
+          deleteReason: deleteReason || "管理员删除"
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSelectedMails(new Set());
+        fetchTimeMails(timeMailsPage, timeMailsStatus, timeMailsSearch);
+        setDeleteModalOpen(false);
+        alert(data.message);
+      } else {
+        alert(data.error || "删除失败");
+      }
+    } catch (error) {
+      console.error("Batch delete error:", error);
+      alert("删除失败");
+    }
+  };
+
+  const handleReviewMails = async (action: "approve" | "reject") => {
+    if (selectedMails.size === 0) {
+      alert("请先选择要审核的邮件");
+      return;
+    }
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/time-mails/review", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ids: Array.from(selectedMails),
+          action
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSelectedMails(new Set());
+        fetchTimeMails(timeMailsPage, timeMailsStatus, timeMailsSearch);
+        alert(data.message);
+      } else {
+        alert(data.error || "审核失败");
+      }
+    } catch (error) {
+      console.error("Review error:", error);
+      alert("审核失败");
+    }
+  };
+
+  const toggleSelectMail = (mailId: string) => {
+    const newSelected = new Set(selectedMails);
+    if (newSelected.has(mailId)) {
+      newSelected.delete(mailId);
+    } else {
+      newSelected.add(mailId);
+    }
+    setSelectedMails(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedMails.size === timeMails.length) {
+      setSelectedMails(new Set());
+    } else {
+      setSelectedMails(new Set(timeMails.map(m => m.id)));
+    }
+  };
+
+  const getStatusLabel = (status: string, lastError: string | null) => {
+    switch (status) {
+      case "pending": return { text: "待审核", color: "bg-yellow-600/20 text-yellow-400" };
+      case "approved": return { text: "已通过", color: "bg-blue-600/20 text-blue-400" };
+      case "rejected": return { text: "已拒绝", color: "bg-gray-600/20 text-gray-400" };
+      case "sent": return { text: "已发送", color: "bg-green-600/20 text-green-400" };
+      case "failed": return { text: "发送失败", color: "bg-red-600/20 text-red-400" };
+      case "resent": return { text: "已补发", color: "bg-green-600/20 text-green-400" };
+      default: return { text: status, color: "bg-gray-600/20 text-gray-400" };
     }
   };
 
@@ -712,7 +942,9 @@ export default function AdminDashboard() {
           <button
             onClick={() => {
               setActiveTab("timeMails");
+              setTimeMailSubTab("list");
               fetchTimeMails(1, "all");
+              fetchModerationSettings();
             }}
             className={`pb-2 px-2 whitespace-nowrap ${
               activeTab === "timeMails"
@@ -799,7 +1031,6 @@ export default function AdminDashboard() {
               发送的消息将立即显示在公共频道，所有用户可见
             </p>
 
-            {/* Draft Messages */}
             {draftMessages.length > 0 && (
               <div className="mb-4">
                 <p className="text-gray-400 text-sm mb-2">待发送消息 ({draftMessages.length})</p>
@@ -827,7 +1058,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Add Message */}
             <div className="space-y-3">
               <div className="flex gap-2">
                 <input
@@ -856,7 +1086,7 @@ export default function AdminDashboard() {
                     className="hidden"
                   />
                   <span className="inline-block px-4 py-2 bg-gray-800 border border-gray-700 hover:border-purple-500 rounded-lg text-gray-300 text-sm cursor-pointer">
-                    📷 添加图片
+                    添加图片
                   </span>
                 </label>
               </div>
@@ -1053,12 +1283,6 @@ export default function AdminDashboard() {
                 </div>
               )}
             </div>
-
-            <div className="bg-gray-900/30 border border-gray-800 rounded-lg p-4">
-              <p className="text-gray-500 text-sm">
-                💡 提示：管理员登录用户端时，使用相同的管理员用户名和密码。
-              </p>
-            </div>
           </div>
         )}
 
@@ -1132,7 +1356,6 @@ export default function AdminDashboard() {
                   </div>
                 ))}
 
-                {/* Pagination */}
                 {publicMessagesTotal > 10 && (
                   <div className="flex justify-center gap-2 mt-6">
                     <button
@@ -1255,145 +1478,476 @@ export default function AdminDashboard() {
         {/* Time Mails Management Tab */}
         {activeTab === "timeMails" && (
           <div className="space-y-4">
-            {/* Stats */}
-            <div className="grid grid-cols-4 gap-4">
+            {/* Sub-tabs */}
+            <div className="flex gap-2 mb-4">
               <button
-                onClick={() => { setTimeMailsStatus("all"); fetchTimeMails(1, "all"); }}
-                className={`p-4 rounded-lg border ${timeMailsStatus === "all" ? "bg-purple-600/20 border-purple-500" : "bg-gray-900/50 border-gray-800"}`}
+                onClick={() => setTimeMailSubTab("list")}
+                className={`px-4 py-2 rounded ${timeMailSubTab === "list" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400"}`}
               >
-                <p className="text-gray-400 text-sm">全部</p>
-                <p className="text-2xl font-bold text-purple-400">{timeMailsStats.total}</p>
+                邮件列表
               </button>
               <button
-                onClick={() => { setTimeMailsStatus("pending"); fetchTimeMails(1, "pending"); }}
-                className={`p-4 rounded-lg border ${timeMailsStatus === "pending" ? "bg-yellow-600/20 border-yellow-500" : "bg-gray-900/50 border-gray-800"}`}
+                onClick={() => {
+                  setTimeMailSubTab("review");
+                  fetchTimeMails(1, "pending");
+                }}
+                className={`px-4 py-2 rounded ${timeMailSubTab === "review" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400"}`}
               >
-                <p className="text-gray-400 text-sm">待发送</p>
-                <p className="text-2xl font-bold text-yellow-400">{timeMailsStats.pending}</p>
+                邮件审核 {timeMailsStats.pending > 0 && `(${timeMailsStats.pending})`}
               </button>
               <button
-                onClick={() => { setTimeMailsStatus("sent"); fetchTimeMails(1, "sent"); }}
-                className={`p-4 rounded-lg border ${timeMailsStatus === "sent" ? "bg-green-600/20 border-green-500" : "bg-gray-900/50 border-gray-800"}`}
+                onClick={() => setTimeMailSubTab("settings")}
+                className={`px-4 py-2 rounded ${timeMailSubTab === "settings" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400"}`}
               >
-                <p className="text-gray-400 text-sm">已发送</p>
-                <p className="text-2xl font-bold text-green-400">{timeMailsStats.sent}</p>
-              </button>
-              <button
-                onClick={() => { setTimeMailsStatus("failed"); fetchTimeMails(1, "failed"); }}
-                className={`p-4 rounded-lg border ${timeMailsStatus === "failed" ? "bg-red-600/20 border-red-500" : "bg-gray-900/50 border-gray-800"}`}
-              >
-                <p className="text-gray-400 text-sm">发送失败</p>
-                <p className="text-2xl font-bold text-red-400">{timeMailsStats.failed}</p>
+                监管设置
               </button>
             </div>
 
-            {timeMailsLoading ? (
-              <div className="text-gray-400 text-center py-12">加载中...</div>
-            ) : timeMails.length === 0 ? (
-              <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
-                暂无邮件
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {timeMails.map((mail) => (
-                  <div
-                    key={mail.id}
-                    className="bg-gray-900/50 border border-gray-800 rounded-lg p-4"
+            {/* List Tab */}
+            {timeMailSubTab === "list" && (
+              <>
+                {/* Stats */}
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                  <button
+                    onClick={() => { setTimeMailsStatus("all"); fetchTimeMails(1, "all", timeMailsSearch); }}
+                    className={`p-3 rounded-lg border text-center ${timeMailsStatus === "all" ? "bg-purple-600/20 border-purple-500" : "bg-gray-900/50 border-gray-800"}`}
                   >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`px-2 py-0.5 rounded text-xs ${
-                            !mail.isSent
-                              ? "bg-yellow-600/20 text-yellow-400"
-                              : mail.lastError
-                                ? "bg-red-600/20 text-red-400"
-                                : "bg-green-600/20 text-green-400"
-                          }`}>
-                            {!mail.isSent ? "待发送" : mail.lastError ? "发送失败" : "已发送"}
-                          </span>
-                          {mail.retryCount > 0 && (
-                            <span className="text-gray-500 text-xs">重试 {mail.retryCount} 次</span>
-                          )}
-                        </div>
-                        <p className="text-gray-200 font-medium">{mail.subject}</p>
-                      </div>
-                    </div>
+                    <p className="text-gray-400 text-xs">全部</p>
+                    <p className="text-xl font-bold text-purple-400">{timeMailsStats.total}</p>
+                  </button>
+                  <button
+                    onClick={() => { setTimeMailsStatus("pending"); fetchTimeMails(1, "pending", timeMailsSearch); }}
+                    className={`p-3 rounded-lg border text-center ${timeMailsStatus === "pending" ? "bg-yellow-600/20 border-yellow-500" : "bg-gray-900/50 border-gray-800"}`}
+                  >
+                    <p className="text-gray-400 text-xs">待审核</p>
+                    <p className="text-xl font-bold text-yellow-400">{timeMailsStats.pending}</p>
+                  </button>
+                  <button
+                    onClick={() => { setTimeMailsStatus("approved"); fetchTimeMails(1, "approved", timeMailsSearch); }}
+                    className={`p-3 rounded-lg border text-center ${timeMailsStatus === "approved" ? "bg-blue-600/20 border-blue-500" : "bg-gray-900/50 border-gray-800"}`}
+                  >
+                    <p className="text-gray-400 text-xs">已通过</p>
+                    <p className="text-xl font-bold text-blue-400">{timeMailsStats.approved}</p>
+                  </button>
+                  <button
+                    onClick={() => { setTimeMailsStatus("sent"); fetchTimeMails(1, "sent", timeMailsSearch); }}
+                    className={`p-3 rounded-lg border text-center ${timeMailsStatus === "sent" ? "bg-green-600/20 border-green-500" : "bg-gray-900/50 border-gray-800"}`}
+                  >
+                    <p className="text-gray-400 text-xs">已发送</p>
+                    <p className="text-xl font-bold text-green-400">{timeMailsStats.sent}</p>
+                  </button>
+                  <button
+                    onClick={() => { setTimeMailsStatus("failed"); fetchTimeMails(1, "failed", timeMailsSearch); }}
+                    className={`p-3 rounded-lg border text-center ${timeMailsStatus === "failed" ? "bg-red-600/20 border-red-500" : "bg-gray-900/50 border-gray-800"}`}
+                  >
+                    <p className="text-gray-400 text-xs">失败</p>
+                    <p className="text-xl font-bold text-red-400">{timeMailsStats.failed}</p>
+                  </button>
+                  <button
+                    onClick={() => { setTimeMailsStatus("resent"); fetchTimeMails(1, "resent", timeMailsSearch); }}
+                    className={`p-3 rounded-lg border text-center ${timeMailsStatus === "resent" ? "bg-green-600/20 border-green-500" : "bg-gray-900/50 border-gray-800"}`}
+                  >
+                    <p className="text-gray-400 text-xs">已补发</p>
+                    <p className="text-xl font-bold text-green-400">{timeMailsStats.resent}</p>
+                  </button>
+                </div>
 
-                    <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                      <div>
-                        <p className="text-gray-500">发送者</p>
-                        <p className="text-gray-300">{mail.senderName}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">收件人</p>
-                        <p className="text-gray-300">{mail.toEmail}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">创建时间</p>
-                        <p className="text-gray-400">{new Date(mail.createdAt).toLocaleString("zh-CN")}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">定时发送时间</p>
-                        <p className="text-gray-400">{new Date(mail.scheduledAt).toLocaleString("zh-CN")}</p>
-                      </div>
-                    </div>
+                {/* Search */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={timeMailsSearch}
+                    onChange={(e) => setTimeMailsSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && fetchTimeMails(1, timeMailsStatus, timeMailsSearch)}
+                    placeholder="搜索创建者真码或收件人邮箱..."
+                    className="flex-1 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                  />
+                  <button
+                    onClick={() => fetchTimeMails(1, timeMailsStatus, timeMailsSearch)}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm"
+                  >
+                    搜索
+                  </button>
+                </div>
 
-                    <div className="bg-gray-800/50 rounded-lg p-3 mb-3">
-                      <p className="text-gray-500 text-xs mb-1">邮件内容</p>
-                      <p className="text-gray-300 text-sm whitespace-pre-wrap line-clamp-3">{mail.content}</p>
-                    </div>
-
-                    {mail.lastError && (
-                      <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-3 mb-3">
-                        <p className="text-red-400 text-xs mb-1">错误信息</p>
-                        <p className="text-red-300 text-sm">{mail.lastError}</p>
-                      </div>
-                    )}
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleCopyMailInfo(mail)}
-                        className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-sm"
-                      >
-                        复制邮件信息
-                      </button>
-                      {mail.lastError && mail.isSent && (
-                        <button
-                          onClick={() => handleMarkAsResent(mail.id)}
-                          className="px-3 py-1.5 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded text-sm"
-                        >
-                          标记为已补发
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-                {/* Pagination */}
-                {timeMailsTotal > 20 && (
-                  <div className="flex justify-center gap-2 mt-6">
+                {/* Batch Actions */}
+                {selectedMails.size > 0 && (
+                  <div className="flex items-center gap-4 bg-gray-800/50 p-3 rounded-lg">
+                    <span className="text-gray-400 text-sm">已选择 {selectedMails.size} 封邮件</span>
                     <button
-                      onClick={() => fetchTimeMails(timeMailsPage - 1, timeMailsStatus)}
-                      disabled={timeMailsPage <= 1}
-                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                      onClick={handleBatchDelete}
+                      className="px-3 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm"
                     >
-                      上一页
+                      批量删除
                     </button>
-                    <span className="px-4 py-2 text-gray-400 text-sm">
-                      第 {timeMailsPage} 页 / 共 {Math.ceil(timeMailsTotal / 20)} 页
-                    </span>
                     <button
-                      onClick={() => fetchTimeMails(timeMailsPage + 1, timeMailsStatus)}
-                      disabled={timeMailsPage >= Math.ceil(timeMailsTotal / 20)}
-                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                      onClick={() => setSelectedMails(new Set())}
+                      className="text-gray-500 hover:text-gray-300 text-sm"
                     >
-                      下一页
+                      取消选择
                     </button>
                   </div>
                 )}
+
+                {timeMailsLoading ? (
+                  <div className="text-gray-400 text-center py-12">加载中...</div>
+                ) : timeMails.length === 0 ? (
+                  <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
+                    暂无邮件
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Select All */}
+                    <div className="flex items-center gap-2 px-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedMails.size === timeMails.length && timeMails.length > 0}
+                        onChange={toggleSelectAll}
+                        className="rounded"
+                      />
+                      <span className="text-gray-500 text-sm">全选</span>
+                    </div>
+
+                    {timeMails.map((mail) => {
+                      const statusInfo = getStatusLabel(mail.status, mail.lastError);
+                      return (
+                        <div
+                          key={mail.id}
+                          className="bg-gray-900/50 border border-gray-800 rounded-lg p-4"
+                        >
+                          <div className="flex items-start gap-3 mb-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedMails.has(mail.id)}
+                              onChange={() => toggleSelectMail(mail.id)}
+                              className="rounded mt-1"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`px-2 py-0.5 rounded text-xs ${statusInfo.color}`}>
+                                  {statusInfo.text}
+                                </span>
+                                {mail.retryCount > 0 && (
+                                  <span className="text-gray-500 text-xs">重试 {mail.retryCount} 次</span>
+                                )}
+                              </div>
+                              <p className="text-gray-200 font-medium">{mail.subject}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-3 ml-8">
+                            <div>
+                              <p className="text-gray-500">发送者</p>
+                              <p className="text-gray-300">{mail.senderName}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">创建者真码</p>
+                              <p className="text-gray-400 text-xs font-mono">{mail.senderId || "匿名"}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">收件人</p>
+                              <p className="text-gray-300">{mail.toEmail}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">定时发送时间</p>
+                              <p className="text-gray-400">{new Date(mail.scheduledAt).toLocaleString("zh-CN")}</p>
+                            </div>
+                          </div>
+
+                          <div className="bg-gray-800/50 rounded-lg p-3 mb-3 ml-8">
+                            <p className="text-gray-500 text-xs mb-1">邮件内容</p>
+                            <p className="text-gray-300 text-sm whitespace-pre-wrap line-clamp-3">{mail.content}</p>
+                          </div>
+
+                          {mail.lastError && (
+                            <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-3 mb-3 ml-8">
+                              <p className="text-red-400 text-xs mb-1">错误信息</p>
+                              <p className="text-red-300 text-sm">{mail.lastError}</p>
+                            </div>
+                          )}
+
+                          <div className="flex gap-2 ml-8">
+                            <button
+                              onClick={() => handleCopyMailInfo(mail)}
+                              className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-sm"
+                            >
+                              复制邮件信息
+                            </button>
+                            {mail.status === "failed" && (
+                              <button
+                                onClick={() => handleMarkAsResent(mail.id)}
+                                className="px-3 py-1.5 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded text-sm"
+                              >
+                                标记为已补发
+                              </button>
+                            )}
+                            {!["sent", "failed", "resent"].includes(mail.status) && (
+                              <button
+                                onClick={() => handleDeleteMail(mail.id)}
+                                className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm"
+                              >
+                                删除
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Pagination */}
+                    {timeMailsTotal > 20 && (
+                      <div className="flex justify-center gap-2 mt-6">
+                        <button
+                          onClick={() => fetchTimeMails(timeMailsPage - 1, timeMailsStatus, timeMailsSearch)}
+                          disabled={timeMailsPage <= 1}
+                          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                        >
+                          上一页
+                        </button>
+                        <span className="px-4 py-2 text-gray-400 text-sm">
+                          第 {timeMailsPage} 页 / 共 {Math.ceil(timeMailsTotal / 20)} 页
+                        </span>
+                        <button
+                          onClick={() => fetchTimeMails(timeMailsPage + 1, timeMailsStatus, timeMailsSearch)}
+                          disabled={timeMailsPage >= Math.ceil(timeMailsTotal / 20)}
+                          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Review Tab */}
+            {timeMailSubTab === "review" && (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-200">待审核邮件</h3>
+                  {selectedMails.size > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-400 text-sm">已选择 {selectedMails.size} 封</span>
+                      <button
+                        onClick={() => handleReviewMails("approve")}
+                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm"
+                      >
+                        批量通过
+                      </button>
+                      <button
+                        onClick={() => handleReviewMails("reject")}
+                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm"
+                      >
+                        批量拒绝
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {timeMailsLoading ? (
+                  <div className="text-gray-400 text-center py-12">加载中...</div>
+                ) : timeMails.length === 0 ? (
+                  <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
+                    暂无待审核邮件
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {timeMails.filter(m => m.status === "pending").map((mail) => (
+                      <div
+                        key={mail.id}
+                        className="bg-gray-900/50 border border-gray-800 rounded-lg p-4"
+                      >
+                        <div className="flex items-start gap-3 mb-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedMails.has(mail.id)}
+                            onChange={() => toggleSelectMail(mail.id)}
+                            className="rounded mt-1"
+                          />
+                          <div className="flex-1">
+                            <p className="text-gray-200 font-medium">{mail.subject}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleReviewMails("approve")}
+                              className="px-3 py-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded text-sm"
+                            >
+                              通过
+                            </button>
+                            <button
+                              onClick={() => handleReviewMails("reject")}
+                              className="px-3 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm"
+                            >
+                              拒绝
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm mb-3 ml-8">
+                          <div>
+                            <p className="text-gray-500">发送者</p>
+                            <p className="text-gray-300">{mail.senderName}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">收件人</p>
+                            <p className="text-gray-300">{mail.toEmail}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">定时发送时间</p>
+                            <p className="text-gray-400">{new Date(mail.scheduledAt).toLocaleString("zh-CN")}</p>
+                          </div>
+                        </div>
+
+                        <div className="bg-gray-800/50 rounded-lg p-3 ml-8">
+                          <p className="text-gray-500 text-xs mb-1">邮件内容</p>
+                          <p className="text-gray-300 text-sm whitespace-pre-wrap">{mail.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Settings Tab */}
+            {timeMailSubTab === "settings" && (
+              <div className="max-w-2xl">
+                <h3 className="text-lg font-medium text-gray-200 mb-4">监管设置</h3>
+
+                <div className="space-y-6">
+                  <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                    <label className="block text-gray-400 text-sm mb-3">监管模式</label>
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="moderation"
+                          value="none"
+                          checked={moderationMode === "none"}
+                          onChange={(e) => setModerationMode(e.target.value)}
+                          className="text-purple-500"
+                        />
+                        <div>
+                          <p className="text-gray-200">无监管</p>
+                          <p className="text-gray-500 text-xs">所有邮件无需审核即可发送</p>
+                        </div>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="moderation"
+                          value="full"
+                          checked={moderationMode === "full"}
+                          onChange={(e) => setModerationMode(e.target.value)}
+                          className="text-purple-500"
+                        />
+                        <div>
+                          <p className="text-gray-200">完全监管</p>
+                          <p className="text-gray-500 text-xs">所有邮件必须经过管理员审核后才能发送</p>
+                        </div>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="moderation"
+                          value="keyword"
+                          checked={moderationMode === "keyword"}
+                          onChange={(e) => setModerationMode(e.target.value)}
+                          className="text-purple-500"
+                        />
+                        <div>
+                          <p className="text-gray-200">关键词监管</p>
+                          <p className="text-gray-500 text-xs">包含指定关键词的邮件需要审核</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {moderationMode === "keyword" && (
+                    <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                      <label className="block text-gray-400 text-sm mb-3">监管关键词</label>
+                      <div className="flex gap-2 mb-3">
+                        <input
+                          type="text"
+                          value={newKeyword}
+                          onChange={(e) => setNewKeyword(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && addKeyword()}
+                          placeholder="输入关键词后按回车添加"
+                          className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                        />
+                        <button
+                          onClick={addKeyword}
+                          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm"
+                        >
+                          添加
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {moderationKeywords.map((keyword, i) => (
+                          <span
+                            key={i}
+                            className="flex items-center gap-1 px-3 py-1 bg-gray-800 rounded-full text-sm"
+                          >
+                            {keyword}
+                            <button
+                              onClick={() => removeKeyword(keyword)}
+                              className="text-gray-500 hover:text-red-400 ml-1"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        {moderationKeywords.length === 0 && (
+                          <p className="text-gray-500 text-sm">暂无关键词</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleSaveModerationSettings}
+                    disabled={moderationLoading}
+                    className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-medium rounded-lg transition-colors"
+                  >
+                    {moderationLoading ? "保存中..." : "保存设置"}
+                  </button>
+                </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Delete Modal */}
+        {deleteModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-medium text-gray-200 mb-4">删除邮件</h3>
+              <p className="text-gray-400 text-sm mb-4">
+                删除后将通知邮件创建者（如有账号）。请输入留言：
+              </p>
+              <textarea
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="请输入删除原因或给用户的留言..."
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500 mb-4"
+                rows={3}
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteModalOpen(false)}
+                  className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={selectedMails.size > 0 ? confirmBatchDelete : confirmDeleteMail}
+                  className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg"
+                >
+                  确认删除
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

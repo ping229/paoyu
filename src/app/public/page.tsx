@@ -12,11 +12,20 @@ interface Message {
 
 interface PublicMessage {
   id: string;
+  type: 'messageSet' | 'timeMail';
   messages: Message[];
   createdAt: string;
   publicAt: string | null;
   likeCount: number;
   commentCount: number;
+  // Time mail specific fields
+  senderName?: string;
+  toEmail?: string;
+  subject?: string;
+  content?: string;
+  scheduledAt?: string;
+  status?: string;
+  sentAt?: string;
 }
 
 interface Comment {
@@ -229,11 +238,18 @@ export default function PublicPage() {
               <button
                 key={msg.id}
                 onClick={() => openBubble(msg)}
-                className={`aspect-square rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 opacity-90 hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 relative ${
+                className={`aspect-square rounded-full opacity-90 hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white shadow-lg relative ${
+                  msg.type === 'timeMail'
+                    ? 'bg-gradient-to-br from-blue-500 via-cyan-500 to-teal-400 shadow-blue-500/30 hover:shadow-blue-500/50'
+                    : 'bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shadow-purple-500/30 hover:shadow-purple-500/50'
+                } ${
                   highlightId === msg.id ? "ring-4 ring-blue-400 ring-offset-2 ring-offset-gray-950" : ""
                 }`}
               >
-                <span className="text-3xl">💬</span>
+                <span className="text-3xl">{msg.type === 'timeMail' ? '✉️' : '💬'}</span>
+                {msg.type === 'timeMail' && (
+                  <span className="text-xs mt-1 opacity-80">时光邮件</span>
+                )}
                 <div className="absolute bottom-4 flex items-center gap-3 text-xs">
                   <span>❤️ {msg.likeCount}</span>
                   <span>💬 {msg.commentCount}</span>
@@ -258,12 +274,28 @@ export default function PublicPage() {
                   </button>
                 </div>
 
+                {/* Time Mail Badge */}
+                {selectedBubble.type === 'timeMail' && (
+                  <div className="mb-4 bg-blue-900/30 border border-blue-700 rounded-lg p-3">
+                    <p className="text-blue-300 text-sm font-medium">✉️ 这是一封时光邮件</p>
+                    {selectedBubble.senderName && (
+                      <p className="text-gray-400 text-xs mt-1">来自：{selectedBubble.senderName}</p>
+                    )}
+                    {selectedBubble.toEmail && (
+                      <p className="text-gray-400 text-xs">收件人：{selectedBubble.toEmail}</p>
+                    )}
+                    {selectedBubble.subject && (
+                      <p className="text-gray-300 text-sm mt-2 font-medium">{selectedBubble.subject}</p>
+                    )}
+                  </div>
+                )}
+
                 {/* Messages */}
                 <div className="space-y-4 max-h-64 overflow-y-auto">
                   {selectedBubble.messages.map((msg) => (
                     <div key={msg.id} className="bg-gray-800/50 rounded-lg p-4">
                       {msg.type === "text" && (
-                        <p className="text-gray-200 leading-relaxed">{msg.content}</p>
+                        <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                       )}
                       {msg.type === "image" && (
                         <img src={msg.content} alt="图片" className="max-w-full rounded" />
@@ -277,11 +309,26 @@ export default function PublicPage() {
 
                 {/* Time info */}
                 <div className="mt-4 pt-4 border-t border-gray-800 text-gray-500 text-xs">
-                  {selectedBubble.publicAt && (
-                    <p>
-                      创建于：{new Date(selectedBubble.createdAt).toLocaleDateString("zh-CN")} |
-                      公开于：{new Date(selectedBubble.publicAt).toLocaleDateString("zh-CN")}
-                    </p>
+                  {selectedBubble.type === 'timeMail' ? (
+                    <>
+                      <p>创建于：{new Date(selectedBubble.createdAt).toLocaleString("zh-CN")}</p>
+                      {selectedBubble.scheduledAt && (
+                        <p>预定发送：{new Date(selectedBubble.scheduledAt).toLocaleString("zh-CN")}</p>
+                      )}
+                      {selectedBubble.sentAt && (
+                        <p>实际发送：{new Date(selectedBubble.sentAt).toLocaleString("zh-CN")}</p>
+                      )}
+                      {selectedBubble.status && (
+                        <p>状态：{selectedBubble.status === 'sent' ? '已发送' : selectedBubble.status === 'resent' ? '已补发' : selectedBubble.status}</p>
+                      )}
+                    </>
+                  ) : (
+                    selectedBubble.publicAt && (
+                      <p>
+                        创建于：{new Date(selectedBubble.createdAt).toLocaleDateString("zh-CN")} |
+                        公开于：{new Date(selectedBubble.publicAt).toLocaleDateString("zh-CN")}
+                      </p>
+                    )
                   )}
                 </div>
 

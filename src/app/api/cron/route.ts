@@ -61,11 +61,14 @@ export async function GET(request: NextRequest) {
     const emailConfig = await getEmailConfig()
 
     if (emailConfig) {
-      // 只取未发送且到期的邮件，按时间排序，限制数量
+      // 只取已审核通过、未发送且到期的邮件，按时间排序，限制数量
+      // 排除已标记为resent（补发成功）的邮件
       const dueMails = await prisma.timeMail.findMany({
         where: {
+          status: 'approved',
           isSent: false,
-          scheduledAt: { lte: now }
+          scheduledAt: { lte: now },
+          deletedAt: null
         },
         orderBy: { scheduledAt: 'asc' },
         take: BATCH_SIZE
@@ -83,9 +86,23 @@ export async function GET(request: NextRequest) {
           )
 
           if (result.success) {
+            // 计算公开时间: min(发送时间, 创建时间+1个月)
+            let publicAt = null
+            if (mail.isPublic) {
+              const oneMonthLater = new Date(mail.createdAt)
+              oneMonthLater.setMonth(oneMonthLater.getMonth() + 1)
+              publicAt = now < oneMonthLater ? oneMonthLater : now
+            }
+
             await prisma.timeMail.update({
               where: { id: mail.id },
-              data: { isSent: true, sentAt: now, lastError: null }
+              data: {
+                status: 'sent',
+                isSent: true,
+                sentAt: now,
+                lastError: null,
+                publicAt
+              }
             })
             return { taskId: mail.id, type: 'timeMail', status: 'completed' }
           } else {
@@ -98,15 +115,15 @@ export async function GET(request: NextRequest) {
               data: {
                 retryCount: newRetryCount,
                 lastError: result.error?.slice(0, 500), // 限制错误信息长度
-                // 超过重试次数则标记为已发送（放弃）
-                ...(shouldGiveUp && { isSent: true, sentAt: now })
+                // 超过重试次数则标记为失败
+                ...(shouldGiveUp && { status: 'failed', isSent: true, sentAt: now })
               }
             })
 
             return {
               taskId: mail.id,
               type: 'timeMail',
-              status: shouldGiveUp ? 'abandoned' : 'failed',
+              status: shouldGiveUp ? 'failed' : 'retry',
               error: result.error,
               retryCount: newRetryCount
             }
@@ -122,14 +139,14 @@ export async function GET(request: NextRequest) {
             data: {
               retryCount: newRetryCount,
               lastError: String(error).slice(0, 500),
-              ...(shouldGiveUp && { isSent: true, sentAt: now })
+              ...(shouldGiveUp && { status: 'failed', isSent: true, sentAt: now })
             }
           })
 
           return {
             taskId: mail.id,
             type: 'timeMail',
-            status: shouldGiveUp ? 'abandoned' : 'failed',
+            status: shouldGiveUp ? 'failed' : 'retry',
             error: String(error),
             retryCount: newRetryCount
           }

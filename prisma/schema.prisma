@@ -191,9 +191,20 @@ model TimeMail {
   sentAt        DateTime? // 实际发送时间
   retryCount    Int       @default(0) // 重试次数
   lastError     String?   // 最后一次错误信息
+
+  // 新增字段
+  status        String    @default("approved") // pending/approved/rejected/sent/failed/resent
+  isPublic      Boolean   @default(true)      // 是否公开到公共频道
+  publicAt      DateTime?                     // 公开时间 = min(发送时间, 创建时间+1个月)
+  deletedAt     DateTime?                     // 删除时间
+  deleteReason  String?                       // 删除原因/管理员留言
+  reviewedAt    DateTime?                     // 审核时间
+  reviewedBy    String?                       // 审核管理员ID
+
   createdAt     DateTime  @default(now())
 
   sender        User?     @relation(fields: [senderId], references: [id], onDelete: SetNull)
 
   @@index([isSent, scheduledAt]) // 优化查询：未发送且到期的邮件
+  @@index([status, scheduledAt]) // 优化查询：审核状态和发送时间
 }
