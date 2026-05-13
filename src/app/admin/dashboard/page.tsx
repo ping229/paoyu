@@ -1489,7 +1489,7 @@ export default function AdminDashboard() {
               <button
                 onClick={() => {
                   setTimeMailSubTab("review");
-                  fetchTimeMails(1, "all");
+                  fetchTimeMails(1, "pending");
                 }}
                 className={`px-4 py-2 rounded ${timeMailSubTab === "review" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400"}`}
               >
@@ -1749,81 +1749,79 @@ export default function AdminDashboard() {
                   <div className="text-gray-400 text-center py-12">加载中...</div>
                 ) : timeMails.length === 0 ? (
                   <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
-                    暂无邮件
+                    暂无待审核邮件
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {timeMails.map((mail) => {
-                      const statusInfo = getStatusLabel(mail.status, mail.lastError);
-                      const isPending = mail.status === "pending";
-                      return (
-                        <div
-                          key={mail.id}
-                          className="bg-gray-900/50 border border-gray-800 rounded-lg p-4"
-                        >
-                          <div className="flex items-start gap-3 mb-2">
-                            {isPending && (
-                              <input
-                                type="checkbox"
-                                checked={selectedMails.has(mail.id)}
-                                onChange={() => toggleSelectMail(mail.id)}
-                                className="rounded mt-1"
-                              />
-                            )}
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={`px-2 py-0.5 rounded text-xs ${statusInfo.color}`}>
-                                  {statusInfo.text}
-                                </span>
-                              </div>
-                              <p className="text-gray-200 font-medium">{mail.subject}</p>
-                            </div>
-                            {isPending && (
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => {
-                                    setSelectedMails(new Set([mail.id]));
-                                    handleReviewMails("approve");
-                                  }}
-                                  className="px-3 py-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded text-sm"
-                                >
-                                  通过
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setSelectedMails(new Set([mail.id]));
-                                    handleReviewMails("reject");
-                                  }}
-                                  className="px-3 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm"
-                                >
-                                  拒绝
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                    {/* Select All */}
+                    <div className="flex items-center gap-2 px-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedMails.size === timeMails.length && timeMails.length > 0}
+                        onChange={toggleSelectAll}
+                        className="rounded"
+                      />
+                      <span className="text-gray-500 text-sm">全选 ({timeMails.length} 封待审核)</span>
+                    </div>
 
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm mb-3 ml-8">
-                            <div>
-                              <p className="text-gray-500">发送者</p>
-                              <p className="text-gray-300">{mail.senderName}</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-500">收件人</p>
-                              <p className="text-gray-300">{mail.toEmail}</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-500">定时发送时间</p>
-                              <p className="text-gray-400">{new Date(mail.scheduledAt).toLocaleString("zh-CN")}</p>
-                            </div>
+                    {timeMails.map((mail) => (
+                      <div
+                        key={mail.id}
+                        className="bg-gray-900/50 border border-gray-800 rounded-lg p-4"
+                      >
+                        <div className="flex items-start gap-3 mb-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedMails.has(mail.id)}
+                            onChange={() => toggleSelectMail(mail.id)}
+                            className="rounded mt-1"
+                          />
+                          <div className="flex-1">
+                            <p className="text-gray-200 font-medium">{mail.subject}</p>
                           </div>
-
-                          <div className="bg-gray-800/50 rounded-lg p-3 ml-8">
-                            <p className="text-gray-500 text-xs mb-1">邮件内容</p>
-                            <p className="text-gray-300 text-sm whitespace-pre-wrap line-clamp-3">{mail.content}</p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                setSelectedMails(new Set([mail.id]));
+                                handleReviewMails("approve");
+                              }}
+                              className="px-3 py-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded text-sm"
+                            >
+                              通过
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedMails(new Set([mail.id]));
+                                handleReviewMails("reject");
+                              }}
+                              className="px-3 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm"
+                            >
+                              拒绝
+                            </button>
                           </div>
                         </div>
-                      );
-                    })}
+
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm mb-3 ml-8">
+                          <div>
+                            <p className="text-gray-500">发送者</p>
+                            <p className="text-gray-300">{mail.senderName}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">收件人</p>
+                            <p className="text-gray-300">{mail.toEmail}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">定时发送时间</p>
+                            <p className="text-gray-400">{new Date(mail.scheduledAt).toLocaleString("zh-CN")}</p>
+                          </div>
+                        </div>
+
+                        <div className="bg-gray-800/50 rounded-lg p-3 ml-8">
+                          <p className="text-gray-500 text-xs mb-1">邮件内容</p>
+                          <p className="text-gray-300 text-sm whitespace-pre-wrap line-clamp-3">{mail.content}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </>
