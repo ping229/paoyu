@@ -62,6 +62,33 @@ interface TimeMail {
   deleteReason: string | null;
 }
 
+interface AIConfig {
+  id: string;
+  name: string;
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  temperature: number;
+  systemPrompt: string | null;
+  isActive: boolean;
+  priority: number;
+  createdAt: string;
+}
+
+interface AILog {
+  id: string;
+  aiConfigId: string;
+  messageSetId: string;
+  messageContent: string;
+  aiResponse: string | null;
+  status: string;
+  errorMessage: string | null;
+  duration: number | null;
+  createdAt: string;
+  aiConfig: { name: string };
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
@@ -123,6 +150,35 @@ export default function AdminDashboard() {
   const [moderationKeywords, setModerationKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState("");
   const [moderationLoading, setModerationLoading] = useState(false);
+
+  // AI 管理
+  const [aiConfigs, setAIConfigs] = useState<AIConfig[]>([]);
+  const [aiLogs, setAILogs] = useState<AILog[]>([]);
+  const [aiEnabled, setAIEnabled] = useState(false);
+  const [aiSubTab, setAISubTab] = useState("configs"); // configs, test, logs
+  const [editingConfig, setEditingConfig] = useState<Partial<AIConfig> | null>(null);
+  const [aiConfigLoading, setAIConfigLoading] = useState(false);
+  const [testMessage, setTestMessage] = useState("");
+  const [testResult, setTestResult] = useState<{ response?: string; duration?: number; error?: string } | null>(null);
+  const [testLoading, setTestLoading] = useState(false);
+  const [aiLogsPage, setAILogsPage] = useState(1);
+  const [aiLogsTotal, setAILogsTotal] = useState(0);
+  const [aiLogsStats, setAILogsStats] = useState({ success: 0, failed: 0, total: 0 });
+
+  // 旅人录管理
+  const [travelerRecords, setTravelerRecords] = useState<any[]>([]);
+  const [travelerRecordsPage, setTravelerRecordsPage] = useState(1);
+  const [travelerRecordsTotal, setTravelerRecordsTotal] = useState(0);
+  const [travelerRecordsLoading, setTravelerRecordsLoading] = useState(false);
+  const [travelerSearch, setTravelerSearch] = useState("");
+  const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+
+  // 词库管理
+  const [adjectives, setAdjectives] = useState<any[]>([]);
+  const [nouns, setNouns] = useState<any[]>([]);
+  const [newAdjective, setNewAdjective] = useState("");
+  const [newNoun, setNewNoun] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("adminToken");
@@ -809,6 +865,358 @@ export default function AdminDashboard() {
     }
   };
 
+  // AI 管理相关函数
+  const fetchAIConfigs = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/ai-config", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setAIConfigs(data.data.configs);
+        setAIEnabled(data.data.enabled);
+      }
+    } catch (error) {
+      console.error("Fetch AI configs error:", error);
+    }
+  };
+
+  const saveAIConfig = async () => {
+    if (!editingConfig?.name || !editingConfig?.apiUrl || !editingConfig?.apiKey || !editingConfig?.model) {
+      alert("请填写必填字段：名称、API端点、API密钥、模型名称");
+      return;
+    }
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    setAIConfigLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/ai-config", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(editingConfig),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        fetchAIConfigs();
+        setEditingConfig(null);
+        alert("保存成功");
+      } else {
+        alert(data.error || "保存失败");
+      }
+    } catch (error) {
+      console.error("Save AI config error:", error);
+      alert("保存失败");
+    } finally {
+      setAIConfigLoading(false);
+    }
+  };
+
+  const deleteAIConfig = async (id: string) => {
+    if (!confirm("确定要删除这个 AI 配置吗？")) return;
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`/api/admin/ai-config?id=${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setAIConfigs((prev) => prev.filter((c) => c.id !== id));
+      } else {
+        alert(data.error || "删除失败");
+      }
+    } catch (error) {
+      console.error("Delete AI config error:", error);
+      alert("删除失败");
+    }
+  };
+
+  const testAIConfig = async () => {
+    if (!editingConfig?.id || !testMessage.trim()) {
+      alert("请先选择一个已保存的 AI 配置并输入测试消息");
+      return;
+    }
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    setTestLoading(true);
+    setTestResult(null);
+
+    try {
+      const res = await fetch("/api/admin/ai-config/test", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          configId: editingConfig.id,
+          message: testMessage,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setTestResult({
+          response: data.data.response,
+          duration: data.data.duration,
+        });
+      } else {
+        setTestResult({ error: data.error || "测试失败" });
+      }
+    } catch (error) {
+      console.error("Test AI error:", error);
+      setTestResult({ error: "测试失败" });
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
+  const toggleAIEnabled = async (enabled: boolean) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/ai-config/test", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setAIEnabled(enabled);
+        alert(enabled ? "已开启 AI 回复" : "已关闭 AI 回复");
+      } else {
+        alert(data.error || "操作失败");
+      }
+    } catch (error) {
+      console.error("Toggle AI error:", error);
+      alert("操作失败");
+    }
+  };
+
+  const fetchAILogs = async (page: number = 1) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`/api/admin/ai-logs?page=${page}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setAILogs(data.data.logs);
+        setAILogsPage(data.data.page);
+        setAILogsTotal(data.data.total);
+        setAILogsStats(data.data.stats);
+      }
+    } catch (error) {
+      console.error("Fetch AI logs error:", error);
+    }
+  };
+
+  // 旅人录管理函数
+  const fetchTravelerRecords = async (page: number = 1) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    setTravelerRecordsLoading(true);
+
+    try {
+      let url = `/api/admin/traveler/list?page=${page}`;
+      if (travelerSearch) {
+        url += `&search=${encodeURIComponent(travelerSearch)}`;
+      }
+
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setTravelerRecords(data.data.records);
+        setTravelerRecordsPage(data.data.page);
+        setTravelerRecordsTotal(data.data.total);
+      }
+    } catch (error) {
+      console.error("Fetch traveler records error:", error);
+    } finally {
+      setTravelerRecordsLoading(false);
+    }
+  };
+
+  // 词库管理函数
+  const fetchWordLibrary = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const [adjRes, nounRes] = await Promise.all([
+        fetch("/api/admin/title-words/adjectives", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch("/api/admin/title-words/nouns", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+
+      const adjData = await adjRes.json();
+      const nounData = await nounRes.json();
+
+      if (adjData.success) setAdjectives(adjData.data);
+      if (nounData.success) setNouns(nounData.data);
+    } catch (error) {
+      console.error("Fetch word library error:", error);
+    }
+  };
+
+  const addAdjective = async () => {
+    if (!newAdjective.trim()) return;
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/title-words/adjectives", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ word: newAdjective.trim() }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setAdjectives((prev) => [...prev, data.data]);
+        setNewAdjective("");
+      } else {
+        alert(data.error || "添加失败");
+      }
+    } catch (error) {
+      console.error("Add adjective error:", error);
+    }
+  };
+
+  const deleteAdjective = async (id: string) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      await fetch(`/api/admin/title-words/adjectives?id=${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setAdjectives((prev) => prev.filter((a) => a.id !== id));
+    } catch (error) {
+      console.error("Delete adjective error:", error);
+    }
+  };
+
+  const toggleAdjective = async (id: string, isActive: boolean) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      await fetch("/api/admin/title-words/adjectives", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id, isActive }),
+      });
+      setAdjectives((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, isActive } : a))
+      );
+    } catch (error) {
+      console.error("Toggle adjective error:", error);
+    }
+  };
+
+  const addNoun = async () => {
+    if (!newNoun.trim()) return;
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/admin/title-words/nouns", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ word: newNoun.trim() }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setNouns((prev) => [...prev, data.data]);
+        setNewNoun("");
+      } else {
+        alert(data.error || "添加失败");
+      }
+    } catch (error) {
+      console.error("Add noun error:", error);
+    }
+  };
+
+  const deleteNoun = async (id: string) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      await fetch(`/api/admin/title-words/nouns?id=${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setNouns((prev) => prev.filter((n) => n.id !== id));
+    } catch (error) {
+      console.error("Delete noun error:", error);
+    }
+  };
+
+  const toggleNoun = async (id: string, isActive: boolean) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return;
+
+    try {
+      await fetch("/api/admin/title-words/nouns", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id, isActive }),
+      });
+      setNouns((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, isActive } : n))
+      );
+    } catch (error) {
+      console.error("Toggle noun error:", error);
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("adminToken");
     router.push("/admin/login");
@@ -953,6 +1361,46 @@ export default function AdminDashboard() {
             }`}
           >
             时光邮件管理
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab("aiManage");
+              setAISubTab("configs");
+              fetchAIConfigs();
+            }}
+            className={`pb-2 px-2 whitespace-nowrap ${
+              activeTab === "aiManage"
+                ? "text-purple-400 border-b-2 border-purple-400"
+                : "text-gray-400"
+            }`}
+          >
+            AI管理
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab("travelerManage");
+              fetchTravelerRecords(1);
+            }}
+            className={`pb-2 px-2 whitespace-nowrap ${
+              activeTab === "travelerManage"
+                ? "text-purple-400 border-b-2 border-purple-400"
+                : "text-gray-400"
+            }`}
+          >
+            旅人录管理
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab("wordLibrary");
+              fetchWordLibrary();
+            }}
+            className={`pb-2 px-2 whitespace-nowrap ${
+              activeTab === "wordLibrary"
+                ? "text-purple-400 border-b-2 border-purple-400"
+                : "text-gray-400"
+            }`}
+          >
+            词库管理
           </button>
         </div>
 
@@ -1932,6 +2380,724 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* AI Management Tab */}
+        {activeTab === "aiManage" && (
+          <div className="space-y-4">
+            {/* Master Switch */}
+            <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-gray-200 font-medium">AI 回复总开关</h3>
+                <p className="text-gray-500 text-sm">开启后，AI 会自动评论公共频道的公开消息</p>
+              </div>
+              <button
+                onClick={() => toggleAIEnabled(!aiEnabled)}
+                className={`px-4 py-2 rounded-lg font-medium ${
+                  aiEnabled
+                    ? "bg-green-600 hover:bg-green-700 text-white"
+                    : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                }`}
+              >
+                {aiEnabled ? "已开启" : "已关闭"}
+              </button>
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setAISubTab("configs")}
+                className={`px-4 py-2 rounded ${aiSubTab === "configs" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400"}`}
+              >
+                AI 配置
+              </button>
+              <button
+                onClick={() => setAISubTab("test")}
+                className={`px-4 py-2 rounded ${aiSubTab === "test" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400"}`}
+              >
+                测试对话
+              </button>
+              <button
+                onClick={() => {
+                  setAISubTab("logs");
+                  fetchAILogs(1);
+                }}
+                className={`px-4 py-2 rounded ${aiSubTab === "logs" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400"}`}
+              >
+                调用日志
+              </button>
+            </div>
+
+            {/* Configs Tab */}
+            {aiSubTab === "configs" && (
+              <div className="space-y-4">
+                {/* Add New Button */}
+                <button
+                  onClick={() => setEditingConfig({ name: "", apiUrl: "", apiKey: "", model: "", maxTokens: 500, temperature: 0.7, systemPrompt: "", isActive: true, priority: 0 })}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm"
+                >
+                  + 添加 AI 配置
+                </button>
+
+                {/* Config List */}
+                {aiConfigs.length === 0 ? (
+                  <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
+                    暂无 AI 配置
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {aiConfigs.map((config) => (
+                      <div key={config.id} className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-gray-200 font-medium">{config.name}</p>
+                              <span className={`px-2 py-0.5 rounded text-xs ${config.isActive ? "bg-green-600/20 text-green-400" : "bg-gray-600/20 text-gray-400"}`}>
+                                {config.isActive ? "启用" : "禁用"}
+                              </span>
+                            </div>
+                            <p className="text-gray-500 text-xs mt-1">模型: {config.model}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setEditingConfig(config)}
+                              className="px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-sm"
+                            >
+                              编辑
+                            </button>
+                            <button
+                              onClick={() => deleteAIConfig(config.id)}
+                              className="px-3 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm"
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-500">
+                          <div>API: {config.apiUrl}</div>
+                          <div>最大长度: {config.maxTokens}</div>
+                          <div>温度: {config.temperature}</div>
+                          <div>优先级: {config.priority}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Edit Modal */}
+                {editingConfig && (
+                  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+                      <h3 className="text-lg font-medium text-gray-200 mb-4">
+                        {editingConfig.id ? "编辑 AI 配置" : "添加 AI 配置"}
+                      </h3>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-gray-400 text-sm mb-2">AI 名称 *</label>
+                          <input
+                            type="text"
+                            value={editingConfig.name || ""}
+                            onChange={(e) => setEditingConfig({ ...editingConfig, name: e.target.value })}
+                            placeholder="显示在评论中的名称"
+                            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-sm mb-2">API 端点 *</label>
+                          <input
+                            type="text"
+                            value={editingConfig.apiUrl || ""}
+                            onChange={(e) => setEditingConfig({ ...editingConfig, apiUrl: e.target.value })}
+                            placeholder="https://api.openai.com/v1/chat/completions"
+                            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-sm mb-2">API 密钥 *</label>
+                          <input
+                            type="password"
+                            value={editingConfig.apiKey || ""}
+                            onChange={(e) => setEditingConfig({ ...editingConfig, apiKey: e.target.value })}
+                            placeholder="sk-..."
+                            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-sm mb-2">模型名称 *</label>
+                          <input
+                            type="text"
+                            value={editingConfig.model || ""}
+                            onChange={(e) => setEditingConfig({ ...editingConfig, model: e.target.value })}
+                            placeholder="gpt-3.5-turbo"
+                            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-gray-400 text-sm mb-2">最大回复长度</label>
+                            <input
+                              type="number"
+                              value={editingConfig.maxTokens || 500}
+                              onChange={(e) => setEditingConfig({ ...editingConfig, maxTokens: parseInt(e.target.value) })}
+                              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-gray-400 text-sm mb-2">温度 (0-2)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={editingConfig.temperature || 0.7}
+                              onChange={(e) => setEditingConfig({ ...editingConfig, temperature: parseFloat(e.target.value) })}
+                              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-sm mb-2">系统提示词</label>
+                          <textarea
+                            value={editingConfig.systemPrompt || ""}
+                            onChange={(e) => setEditingConfig({ ...editingConfig, systemPrompt: e.target.value })}
+                            placeholder="自定义 AI 的行为和角色..."
+                            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                            rows={3}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-gray-400 text-sm mb-2">优先级</label>
+                            <input
+                              type="number"
+                              value={editingConfig.priority || 0}
+                              onChange={(e) => setEditingConfig({ ...editingConfig, priority: parseInt(e.target.value) })}
+                              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-purple-500"
+                            />
+                            <p className="text-gray-500 text-xs mt-1">数字越小越优先</p>
+                          </div>
+                          <div>
+                            <label className="block text-gray-400 text-sm mb-2">状态</label>
+                            <select
+                              value={editingConfig.isActive ? "true" : "false"}
+                              onChange={(e) => setEditingConfig({ ...editingConfig, isActive: e.target.value === "true" })}
+                              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-purple-500"
+                            >
+                              <option value="true">启用</option>
+                              <option value="false">禁用</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-3 mt-6">
+                        <button
+                          onClick={() => setEditingConfig(null)}
+                          className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg"
+                        >
+                          取消
+                        </button>
+                        <button
+                          onClick={saveAIConfig}
+                          disabled={aiConfigLoading}
+                          className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white rounded-lg"
+                        >
+                          {aiConfigLoading ? "保存中..." : "保存"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Test Tab */}
+            {aiSubTab === "test" && (
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-6">
+                <h3 className="text-lg font-medium text-gray-200 mb-4">测试 AI 对话</h3>
+                <p className="text-gray-400 text-sm mb-4">
+                  选择一个已保存的 AI 配置进行测试对话
+                </p>
+
+                {aiConfigs.length === 0 ? (
+                  <p className="text-gray-500">请先添加 AI 配置</p>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-gray-400 text-sm mb-2">选择 AI 配置</label>
+                      <select
+                        value={editingConfig?.id || ""}
+                        onChange={(e) => {
+                          const config = aiConfigs.find((c) => c.id === e.target.value);
+                          setEditingConfig(config || null);
+                        }}
+                        className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-purple-500"
+                      >
+                        <option value="">请选择...</option>
+                        {aiConfigs.map((config) => (
+                          <option key={config.id} value={config.id}>
+                            {config.name} ({config.model})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-gray-400 text-sm mb-2">测试消息</label>
+                      <textarea
+                        value={testMessage}
+                        onChange={(e) => setTestMessage(e.target.value)}
+                        placeholder="输入测试消息..."
+                        className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                        rows={3}
+                      />
+                    </div>
+                    <button
+                      onClick={testAIConfig}
+                      disabled={testLoading || !editingConfig?.id || !testMessage.trim()}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white rounded-lg text-sm"
+                    >
+                      {testLoading ? "测试中..." : "发送测试"}
+                    </button>
+
+                    {testResult && (
+                      <div className="bg-gray-800/50 rounded-lg p-4 mt-4">
+                        {testResult.error ? (
+                          <div>
+                            <p className="text-red-400 text-sm mb-2">错误</p>
+                            <p className="text-red-300 text-sm">{testResult.error}</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-green-400 text-sm">AI 回复</p>
+                              {testResult.duration && (
+                                <p className="text-gray-500 text-xs">耗时: {testResult.duration}ms</p>
+                              )}
+                            </div>
+                            <p className="text-gray-300 text-sm whitespace-pre-wrap">{testResult.response}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Logs Tab */}
+            {aiSubTab === "logs" && (
+              <div className="space-y-4">
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4 text-center">
+                    <p className="text-gray-400 text-sm">总调用</p>
+                    <p className="text-2xl font-bold text-purple-400">{aiLogsStats.total}</p>
+                  </div>
+                  <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4 text-center">
+                    <p className="text-gray-400 text-sm">成功</p>
+                    <p className="text-2xl font-bold text-green-400">{aiLogsStats.success}</p>
+                  </div>
+                  <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4 text-center">
+                    <p className="text-gray-400 text-sm">失败</p>
+                    <p className="text-2xl font-bold text-red-400">{aiLogsStats.failed}</p>
+                  </div>
+                </div>
+
+                {/* Logs List */}
+                {aiLogs.length === 0 ? (
+                  <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
+                    暂无调用日志
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {aiLogs.map((log) => (
+                      <div key={log.id} className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <span className={`px-2 py-0.5 rounded text-xs ${log.status === "success" ? "bg-green-600/20 text-green-400" : "bg-red-600/20 text-red-400"}`}>
+                              {log.status === "success" ? "成功" : "失败"}
+                            </span>
+                            <span className="text-gray-400 text-xs ml-2">{log.aiConfig.name}</span>
+                          </div>
+                          <div className="text-gray-500 text-xs">
+                            {new Date(log.createdAt).toLocaleString("zh-CN")}
+                            {log.duration && <span className="ml-2">{log.duration}ms</span>}
+                          </div>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-lg p-3 mb-2">
+                          <p className="text-gray-500 text-xs mb-1">触发内容</p>
+                          <p className="text-gray-300 text-sm line-clamp-2">{log.messageContent}</p>
+                        </div>
+                        {log.aiResponse && (
+                          <div className="bg-gray-800/50 rounded-lg p-3 mb-2">
+                            <p className="text-gray-500 text-xs mb-1">AI 回复</p>
+                            <p className="text-gray-300 text-sm line-clamp-3">{log.aiResponse}</p>
+                          </div>
+                        )}
+                        {log.errorMessage && (
+                          <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-3">
+                            <p className="text-red-400 text-xs mb-1">错误信息</p>
+                            <p className="text-red-300 text-sm">{log.errorMessage}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Pagination */}
+                    {aiLogsTotal > 50 && (
+                      <div className="flex justify-center gap-2 mt-6">
+                        <button
+                          onClick={() => fetchAILogs(aiLogsPage - 1)}
+                          disabled={aiLogsPage <= 1}
+                          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                        >
+                          上一页
+                        </button>
+                        <span className="px-4 py-2 text-gray-400 text-sm">
+                          第 {aiLogsPage} 页 / 共 {Math.ceil(aiLogsTotal / 50)} 页
+                        </span>
+                        <button
+                          onClick={() => fetchAILogs(aiLogsPage + 1)}
+                          disabled={aiLogsPage >= Math.ceil(aiLogsTotal / 50)}
+                          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Traveler Record Management Tab */}
+        {activeTab === "travelerManage" && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-medium text-gray-200">旅人录管理</h2>
+
+            {/* Search */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={travelerSearch}
+                onChange={(e) => setTravelerSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && fetchTravelerRecords(1)}
+                placeholder="搜索称号、描述或交互码..."
+                className="flex-1 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500"
+              />
+              <button
+                onClick={() => fetchTravelerRecords(1)}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm"
+              >
+                搜索
+              </button>
+            </div>
+
+            {travelerRecordsLoading ? (
+              <div className="text-gray-400 text-center py-12">加载中...</div>
+            ) : travelerRecords.length === 0 ? (
+              <div className="text-gray-500 text-center py-12 bg-gray-900/30 rounded-lg border border-gray-800">
+                暂无旅人录
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {travelerRecords.map((record) => (
+                  <div key={record.id} className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-lg font-medium ${record.titleBanned ? 'text-red-400 line-through' : 'text-purple-400'}`}>
+                            {record.title}
+                          </span>
+                          {record.titleBanned && (
+                            <span className="px-2 py-0.5 rounded text-xs bg-red-600/20 text-red-400">称号已封禁</span>
+                          )}
+                        </div>
+                        <p className={`text-sm ${record.descBanned ? 'text-red-400 line-through' : 'text-gray-400'}`}>
+                          {record.description || '暂无描述'}
+                        </p>
+                        {record.descBanned && (
+                          <span className="px-2 py-0.5 rounded text-xs bg-red-600/20 text-red-400 mt-1 inline-block">描述已封禁</span>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-300 text-sm font-mono">旅人ID: {record.travelerId || '未生成'}</p>
+                        <p className="text-gray-400 text-sm">交互码: {record.intercode}</p>
+                        {!record.isPublic && (
+                          <span className="text-yellow-400 text-xs">未公开</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 封禁统计 */}
+                    <div className="flex gap-4 mb-3 text-xs text-gray-500">
+                      <span>称号封禁: <span className="text-orange-400">{record.titleBanCount || 0}次</span></span>
+                      <span>描述封禁: <span className="text-orange-400">{record.descBanCount || 0}次</span></span>
+                    </div>
+
+                    {/* 封禁历史 */}
+                    {record.banHistory && record.banHistory.length > 0 && (
+                      <div className="mb-3 p-2 bg-gray-800/50 rounded text-xs">
+                        <p className="text-gray-500 mb-1">封禁历史：</p>
+                        {record.banHistory.map((h: any) => (
+                          <div key={h.id} className="text-gray-400 mb-1">
+                            <span className="text-gray-500">{new Date(h.createdAt).toLocaleString('zh-CN')}</span>
+                            <span className={`ml-2 ${h.banType === 'title' ? 'text-red-400' : 'text-orange-400'}`}>
+                              [{h.banType === 'title' ? '称号' : '描述'}]
+                            </span>
+                            <span className="ml-2">"{h.originalContent}"</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 flex-wrap">
+                      {/* 修改称号 */}
+                      {editingTitle === record.id ? (
+                        <div className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            placeholder="输入新称号..."
+                            maxLength={20}
+                            className="px-3 py-1 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm"
+                          />
+                          <button
+                            onClick={async () => {
+                              const token = localStorage.getItem("adminToken");
+                              if (!token || !newTitle.trim()) return;
+                              await fetch(`/api/admin/traveler/${record.id}`, {
+                                method: "PUT",
+                                headers: {
+                                  Authorization: `Bearer ${token}`,
+                                  "Content-Type": "application/json"
+                                },
+                                body: JSON.stringify({ recordId: record.id, title: newTitle.trim() })
+                              });
+                              setEditingTitle(null);
+                              fetchTravelerRecords(travelerRecordsPage);
+                            }}
+                            className="px-3 py-1 bg-purple-600 text-white rounded text-sm"
+                          >
+                            保存
+                          </button>
+                          <button
+                            onClick={() => setEditingTitle(null)}
+                            className="px-3 py-1 bg-gray-700 text-gray-300 rounded text-sm"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setEditingTitle(record.id);
+                            setNewTitle(record.title);
+                          }}
+                          className="px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-sm"
+                        >
+                          修改称号
+                        </button>
+                      )}
+
+                      {/* 封禁/解封称号 */}
+                      <button
+                        onClick={async () => {
+                          const token = localStorage.getItem("adminToken");
+                          if (!token) return;
+                          await fetch(`/api/admin/traveler/${record.id}`, {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                              recordId: record.id,
+                              action: record.titleBanned ? 'unban-title' : 'ban-title'
+                            })
+                          });
+                          fetchTravelerRecords(travelerRecordsPage);
+                        }}
+                        className={`px-3 py-1 rounded text-sm ${
+                          record.titleBanned
+                            ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
+                            : 'bg-red-600/20 hover:bg-red-600/30 text-red-400'
+                        }`}
+                      >
+                        {record.titleBanned ? '解封称号' : '封禁称号'}
+                      </button>
+
+                      {/* 封禁/解封描述 */}
+                      <button
+                        onClick={async () => {
+                          const token = localStorage.getItem("adminToken");
+                          if (!token) return;
+                          await fetch(`/api/admin/traveler/${record.id}`, {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                              recordId: record.id,
+                              action: record.descBanned ? 'unban-desc' : 'ban-desc'
+                            })
+                          });
+                          fetchTravelerRecords(travelerRecordsPage);
+                        }}
+                        className={`px-3 py-1 rounded text-sm ${
+                          record.descBanned
+                            ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
+                            : 'bg-red-600/20 hover:bg-red-600/30 text-red-400'
+                        }`}
+                      >
+                        {record.descBanned ? '解封描述' : '封禁描述'}
+                      </button>
+
+                      {/* 封禁用户 */}
+                      <button
+                        onClick={async () => {
+                          if (!confirm("确定要封禁该用户吗？此操作将删除该用户的所有数据！")) return;
+                          const token = localStorage.getItem("adminToken");
+                          if (!token) return;
+                          await fetch("/api/admin/ban", {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({ recordId: record.id })
+                          });
+                          fetchTravelerRecords(travelerRecordsPage);
+                        }}
+                        className="px-3 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-sm"
+                      >
+                        封禁用户
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Pagination */}
+                {travelerRecordsTotal > 30 && (
+                  <div className="flex justify-center gap-2 mt-6">
+                    <button
+                      onClick={() => fetchTravelerRecords(travelerRecordsPage - 1)}
+                      disabled={travelerRecordsPage <= 1}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                    >
+                      上一页
+                    </button>
+                    <span className="px-4 py-2 text-gray-400 text-sm">
+                      第 {travelerRecordsPage} 页 / 共 {Math.ceil(travelerRecordsTotal / 30)} 页
+                    </span>
+                    <button
+                      onClick={() => fetchTravelerRecords(travelerRecordsPage + 1)}
+                      disabled={travelerRecordsPage >= Math.ceil(travelerRecordsTotal / 30)}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-500 text-gray-300 rounded text-sm"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Word Library Tab */}
+        {activeTab === "wordLibrary" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Adjectives */}
+            <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+              <h3 className="text-lg font-medium text-gray-200 mb-4">形容词库 ({adjectives.length})</h3>
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={newAdjective}
+                  onChange={(e) => setNewAdjective(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addAdjective()}
+                  placeholder="输入形容词..."
+                  className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm"
+                />
+                <button
+                  onClick={addAdjective}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm"
+                >
+                  添加
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
+                {adjectives.map((adj) => (
+                  <span
+                    key={adj.id}
+                    className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm ${
+                      adj.isActive ? 'bg-gray-800 text-gray-300' : 'bg-gray-800/50 text-gray-500'
+                    }`}
+                  >
+                    {adj.word}
+                    <button
+                      onClick={() => toggleAdjective(adj.id, !adj.isActive)}
+                      className={`ml-1 ${adj.isActive ? 'text-yellow-400 hover:text-yellow-300' : 'text-green-400 hover:text-green-300'}`}
+                    >
+                      {adj.isActive ? '禁' : '启'}
+                    </button>
+                    <button
+                      onClick={() => deleteAdjective(adj.id)}
+                      className="text-red-400 hover:text-red-300 ml-1"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Nouns */}
+            <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+              <h3 className="text-lg font-medium text-gray-200 mb-4">名词库 ({nouns.length})</h3>
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={newNoun}
+                  onChange={(e) => setNewNoun(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addNoun()}
+                  placeholder="输入名词..."
+                  className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm"
+                />
+                <button
+                  onClick={addNoun}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm"
+                >
+                  添加
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
+                {nouns.map((noun) => (
+                  <span
+                    key={noun.id}
+                    className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm ${
+                      noun.isActive ? 'bg-gray-800 text-gray-300' : 'bg-gray-800/50 text-gray-500'
+                    }`}
+                  >
+                    {noun.word}
+                    <button
+                      onClick={() => toggleNoun(noun.id, !noun.isActive)}
+                      className={`ml-1 ${noun.isActive ? 'text-yellow-400 hover:text-yellow-300' : 'text-green-400 hover:text-green-300'}`}
+                    >
+                      {noun.isActive ? '禁' : '启'}
+                    </button>
+                    <button
+                      onClick={() => deleteNoun(noun.id)}
+                      className="text-red-400 hover:text-red-300 ml-1"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 

@@ -62,8 +62,29 @@ export async function POST(request: NextRequest) {
       }
     })
 
+    // 更新阅读状态：标记为已评论
+    await prisma.bubbleReadStatus.upsert({
+      where: {
+        userId_messageSetId: {
+          userId: payload.userId,
+          messageSetId
+        }
+      },
+      update: {
+        hasCommented: true,
+        hasRead: true
+      },
+      create: {
+        userId: payload.userId,
+        messageSetId,
+        hasCommented: true,
+        hasRead: true,
+        readAt: new Date()
+      }
+    })
+
     // 如果是回复别人的评论，发送通知泡泡给被回复者
-    if (replyToComment && replyToComment.userId !== payload.userId) {
+    if (replyToComment && replyToComment.userId && replyToComment.userId !== payload.userId) {
       // 创建通知泡泡
       await prisma.messageSet.create({
         data: {

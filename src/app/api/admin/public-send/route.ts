@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyToken, getTokenFromHeader } from '@/lib/auth'
+import { generateAICommentsForMessageSet } from '@/lib/ai'
 
 export async function POST(request: NextRequest) {
   try {
@@ -80,6 +81,15 @@ export async function POST(request: NextRequest) {
         details: `发送了 ${messages.length} 条消息到公共频道`
       }
     })
+
+    // 异步触发 AI 回复（不阻塞响应）
+    generateAICommentsForMessageSet(
+      messageSet.id,
+      messages.map((m: { type: string; content: string }) => ({
+        type: m.type as 'text' | 'image',
+        content: m.content
+      }))
+    ).catch(err => console.error('AI comment error:', err))
 
     return NextResponse.json({
       success: true,

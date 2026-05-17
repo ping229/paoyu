@@ -35,6 +35,12 @@ export default function Nav() {
             公共频道
           </Link>
           <Link
+            href="/gathering"
+            className="text-gray-400 hover:text-purple-400 transition-colors text-sm"
+          >
+            集会
+          </Link>
+          <Link
             href="/time-mail"
             className="text-gray-400 hover:text-purple-400 transition-colors text-sm"
           >

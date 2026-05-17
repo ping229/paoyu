@@ -36,6 +36,38 @@ interface Comment {
   replyToId: string | null;
   replyToContent: string | null;
   isOwner: boolean;
+  isAIComment?: boolean;
+  aiConfigId?: string;
+}
+
+interface ReadStatus {
+  [key: string]: {
+    hasRead: boolean;
+    hasCommented: boolean;
+  };
+}
+
+const READ_STATUS_KEY = 'bubble_read_status';
+
+// 从 localStorage 加载阅读状态
+function loadReadStatusFromLocal(): ReadStatus {
+  if (typeof window === 'undefined') return {};
+  try {
+    const stored = localStorage.getItem(READ_STATUS_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+// 保存阅读状态到 localStorage
+function saveReadStatusToLocal(status: ReadStatus) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(READ_STATUS_KEY, JSON.stringify(status));
+  } catch {
+    // localStorage 可能已满
+  }
 }
 
 export default function PublicPage() {
@@ -52,11 +84,17 @@ export default function PublicPage() {
   const [commentText, setCommentText] = useState("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  const [readStatus, setReadStatus] = useState<ReadStatus>({});
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchPublicMessages();
     const token = localStorage.getItem("token");
     setIsLoggedIn(!!token);
+
+    // 加载本地缓存的阅读状态
+    const localStatus = loadReadStatusFromLocal();
+    setReadStatus(localStatus);
   }, []);
 
   const fetchPublicMessages = async () => {
@@ -65,6 +103,28 @@ export default function PublicPage() {
       const data = await res.json();
       if (data.success) {
         setMessages(data.data);
+
+        // 如果已登录，获取服务器端的阅读状态
+        const token = localStorage.getItem("token");
+        if (token && data.data.length > 0) {
+          const ids = data.data.map((m: PublicMessage) => m.id).join(',');
+          const statusRes = await fetch(`/api/bubble/read-status?ids=${ids}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const statusData = await statusRes.json();
+          if (statusData.success) {
+            // 合并服务器状态和本地缓存
+            const localStatus = loadReadStatusFromLocal();
+            const serverStatus: ReadStatus = {};
+            statusData.data.forEach((s: { messageSetId: string; hasRead: boolean; hasCommented: boolean }) => {
+              serverStatus[s.messageSetId] = {
+                hasRead: s.hasRead || localStatus[s.messageSetId]?.hasRead || false,
+                hasCommented: s.hasCommented || localStatus[s.messageSetId]?.hasCommented || false
+              };
+            });
+            setReadStatus(prev => ({ ...localStatus, ...serverStatus }));
+          }
+        }
 
         // 如果有高亮ID，自动打开对应的泡泡
         if (highlightId) {
@@ -90,6 +150,9 @@ export default function PublicPage() {
     setLiked(false);
     setReplyTo(null);
 
+    // 标记为已读
+    markAsRead(bubble.id);
+
     // 获取评论
     const token = localStorage.getItem("token");
     const commentsRes = await fetch(`/api/comment/list?messageSetId=${bubble.id}`, {
@@ -111,6 +174,54 @@ export default function PublicPage() {
         setLikeCount(likeData.data.likeCount);
       }
     }
+  };
+
+  // 标记泡泡为已读
+  const markAsRead = async (messageSetId: string) => {
+    // 更新本地状态
+    setReadStatus(prev => {
+      const newStatus = {
+        ...prev,
+        [messageSetId]: {
+          hasRead: true,
+          hasCommented: prev[messageSetId]?.hasCommented || false
+        }
+      };
+      saveReadStatusToLocal(newStatus);
+      return newStatus;
+    });
+
+    // 如果已登录，同步到服务器
+    const token = localStorage.getItem("token");
+    if (token) {
+      try {
+        await fetch("/api/bubble/read-status", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ messageSetId })
+        });
+      } catch (error) {
+        console.error("Mark read error:", error);
+      }
+    }
+  };
+
+  // 标记为已评论
+  const markAsCommented = (messageSetId: string) => {
+    setReadStatus(prev => {
+      const newStatus = {
+        ...prev,
+        [messageSetId]: {
+          hasRead: true,
+          hasCommented: true
+        }
+      };
+      saveReadStatusToLocal(newStatus);
+      return newStatus;
+    });
   };
 
   const handleLike = async () => {
@@ -176,6 +287,11 @@ export default function PublicPage() {
         }]);
         setCommentText("");
         setReplyTo(null);
+
+        // 标记为已评论
+        if (selectedBubble) {
+          markAsCommented(selectedBubble.id);
+        }
       }
     } catch (error) {
       console.error("Comment error:", error);
@@ -234,28 +350,45 @@ export default function PublicPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            {messages.map((msg) => (
-              <button
-                key={msg.id}
-                onClick={() => openBubble(msg)}
-                className={`aspect-square rounded-full opacity-90 hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white shadow-lg relative ${
-                  msg.type === 'timeMail'
-                    ? 'bg-gradient-to-br from-blue-500 via-cyan-500 to-teal-400 shadow-blue-500/30 hover:shadow-blue-500/50'
-                    : 'bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shadow-purple-500/30 hover:shadow-purple-500/50'
-                } ${
-                  highlightId === msg.id ? "ring-4 ring-blue-400 ring-offset-2 ring-offset-gray-950" : ""
-                }`}
-              >
-                <span className="text-3xl">{msg.type === 'timeMail' ? '✉️' : '💬'}</span>
-                {msg.type === 'timeMail' && (
-                  <span className="text-xs mt-1 opacity-80">时光邮件</span>
-                )}
-                <div className="absolute bottom-4 flex items-center gap-3 text-xs">
-                  <span>❤️ {msg.likeCount}</span>
-                  <span>💬 {msg.commentCount}</span>
-                </div>
-              </button>
-            ))}
+            {messages.map((msg) => {
+              const status = readStatus[msg.id] || { hasRead: false, hasCommented: false };
+              const isUnread = !status.hasRead;
+              const hasCommented = status.hasCommented;
+
+              return (
+                <button
+                  key={msg.id}
+                  onClick={() => openBubble(msg)}
+                  className={`aspect-square rounded-full transition-all flex flex-col items-center justify-center text-white shadow-lg relative ${
+                    msg.type === 'timeMail'
+                      ? 'bg-gradient-to-br from-blue-500 via-cyan-500 to-teal-400'
+                      : 'bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400'
+                  } ${
+                    isUnread
+                      ? 'opacity-100 shadow-2xl ring-2 ring-white/30 ring-offset-2 ring-offset-gray-950'
+                      : 'opacity-50 hover:opacity-70'
+                  } ${
+                    highlightId === msg.id ? "ring-4 ring-blue-400 ring-offset-2 ring-offset-gray-950" : ""
+                  }`}
+                >
+                  {/* 已评论标记 */}
+                  {hasCommented && (
+                    <span className="absolute -top-1 -right-1 bg-green-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center shadow-lg">
+                      ✓
+                    </span>
+                  )}
+
+                  <span className="text-3xl">{msg.type === 'timeMail' ? '✉️' : '💬'}</span>
+                  {msg.type === 'timeMail' && (
+                    <span className="text-xs mt-1 opacity-80">时光邮件</span>
+                  )}
+                  <div className="absolute bottom-4 flex items-center gap-3 text-xs">
+                    <span>❤️ {msg.likeCount}</span>
+                    <span>💬 {msg.commentCount}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -361,7 +494,13 @@ export default function PublicPage() {
                     ) : (
                       <div className="space-y-2">
                         {comments.map((c) => (
-                          <div key={c.id} className="bg-gray-800/50 rounded-lg p-3">
+                          <div key={c.id} className={`rounded-lg p-3 ${c.isAIComment ? 'bg-purple-900/30 border border-purple-700/50' : 'bg-gray-800/50'}`}>
+                            {/* AI 评论标记 */}
+                            {c.isAIComment && (
+                              <div className="flex items-center gap-1 mb-1">
+                                <span className="text-purple-400 text-xs">🤖 AI 助手</span>
+                              </div>
+                            )}
                             {/* 引用回复 */}
                             {c.replyToContent && (
                               <div className="mb-2 pl-3 border-l-2 border-gray-600 text-gray-500 text-sm">
@@ -382,12 +521,15 @@ export default function PublicPage() {
                                     >
                                       回复
                                     </button>
-                                    <button
-                                      onClick={() => handlePrivateChat(c.userId)}
-                                      className="text-blue-400 hover:text-blue-300 text-xs"
-                                    >
-                                      私聊
-                                    </button>
+                                    {/* AI 评论不显示私聊按钮 */}
+                                    {!c.isAIComment && c.userId && (
+                                      <button
+                                        onClick={() => handlePrivateChat(c.userId)}
+                                        className="text-blue-400 hover:text-blue-300 text-xs"
+                                      >
+                                        私聊
+                                      </button>
+                                    )}
                                   </>
                                 )}
                                 {c.isOwner && (

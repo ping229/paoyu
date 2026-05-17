@@ -40,7 +40,9 @@ export async function GET(request: NextRequest) {
       userId: c.userId, // 真码，用于发送私聊泡泡
       replyToId: c.replyToId,
       replyToContent: c.replyTo?.content || null,
-      isOwner: c.userId === currentUserId // 是否是本人的评论
+      isOwner: c.userId === currentUserId, // 是否是本人的评论
+      isAIComment: c.isAIComment, // 是否是 AI 评论
+      aiConfigId: c.aiConfigId // AI 配置 ID
     }))
 
     return NextResponse.json({

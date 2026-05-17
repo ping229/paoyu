@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getEmailConfig, sendTimeMail } from '@/lib/email'
+import { generateAICommentsForMessageSet, isAIReplyEnabled } from '@/lib/ai'
 
 // 配置
 const BATCH_SIZE = 10 // 每次最多处理邮件数
@@ -21,6 +22,9 @@ export async function GET(request: NextRequest) {
     const now = new Date()
     const results = []
 
+    // 检查 AI 回复是否启用
+    const aiEnabled = await isAIReplyEnabled()
+
     // 1. 处理泡泡定时任务（分批）
     const dueTasks = await prisma.scheduledTask.findMany({
       where: {
@@ -32,17 +36,41 @@ export async function GET(request: NextRequest) {
 
     for (const task of dueTasks) {
       try {
-        if (task.receiverId) {
-          await prisma.messageSet.updateMany({
+        // 更新消息集为公开
+        const updatedMessageSets = await prisma.messageSet.updateMany({
+          where: {
+            senderId: task.senderId,
+            scheduledAt: task.scheduledAt
+          },
+          data: {
+            isPublic: task.isPublic,
+            publicAt: task.isPublic ? now : null
+          }
+        })
+
+        // 如果是公开消息且 AI 启用，触发 AI 回复
+        if (task.isPublic && aiEnabled && updatedMessageSets.count > 0) {
+          // 获取消息集详情
+          const messageSets = await prisma.messageSet.findMany({
             where: {
               senderId: task.senderId,
-              scheduledAt: task.scheduledAt
+              scheduledAt: task.scheduledAt,
+              isPublic: true
             },
-            data: {
-              isPublic: task.isPublic,
-              publicAt: task.isPublic ? now : null
+            include: {
+              messages: true
             }
           })
+
+          for (const ms of messageSets) {
+            generateAICommentsForMessageSet(
+              ms.id,
+              ms.messages.map(m => ({
+                type: m.type as 'text' | 'image',
+                content: m.content
+              }))
+            ).catch(err => console.error('AI comment error:', err))
+          }
         }
 
         await prisma.scheduledTask.update({

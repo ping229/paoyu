@@ -17,7 +17,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { userId } = body
+    let { userId, recordId } = body
+
+    // 如果提供了recordId但没有userId，通过旅人录查找userId
+    if (!userId && recordId) {
+      const record = await prisma.travelerRecord.findUnique({
+        where: { id: recordId },
+        select: { userId: true }
+      })
+      if (record) {
+        userId = record.userId
+      }
+    }
 
     if (!userId) {
       return NextResponse.json({ error: '缺少用户ID' }, { status: 400 })

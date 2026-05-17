@@ -29,9 +29,11 @@ model User {
   scheduledTasks      ScheduledTask[]
   reportsMade         Report[]            @relation("Reporter")
   reportsReceived     Report[]            @relation("Reported")
-  comments            Comment[]
+  comments            Comment[] @relation("UserComments")
   likes               Like[]
   timeMails           TimeMail[]
+  bubbleReadStatus    BubbleReadStatus[]
+  travelerRecord      TravelerRecord?
 }
 
 // 交互码变更历史
@@ -65,6 +67,7 @@ model MessageSet {
   report       Report?
   comments     Comment[]
   likes        Like[]
+  readStatus   BubbleReadStatus[]
 }
 
 // 单条消息
@@ -124,13 +127,15 @@ model Report {
 model Comment {
   id            String    @id @default(uuid())
   messageSetId  String
-  userId        String
+  userId        String?
   content       String
   replyToId     String?   // 回复的评论ID
+  isAIComment   Boolean   @default(false) // 是否是 AI 评论
+  aiConfigId    String?   // 关联的 AI 配置ID
   createdAt     DateTime  @default(now())
 
   messageSet    MessageSet @relation(fields: [messageSetId], references: [id], onDelete: Cascade)
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User?     @relation("UserComments", fields: [userId], references: [id], onDelete: SetNull)
   replyTo       Comment?  @relation("CommentReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies       Comment[] @relation("CommentReplies")
 }
@@ -207,4 +212,108 @@ model TimeMail {
 
   @@index([isSent, scheduledAt]) // 优化查询：未发送且到期的邮件
   @@index([status, scheduledAt]) // 优化查询：审核状态和发送时间
+}
+
+// AI 配置
+model AIConfig {
+  id            String    @id @default(uuid())
+  name          String    // AI 名称（显示在评论中）
+  apiUrl        String    // API 端点
+  apiKey        String    // API 密钥
+  model         String    // 模型名称（如 gpt-3.5-turbo）
+  maxTokens     Int       @default(500)    // 最大回复长度
+  temperature   Float     @default(0.7)    // 温度参数
+  systemPrompt  String?   // 自定义系统提示词
+  isActive      Boolean   @default(true)   // 是否启用
+  priority      Int       @default(0)      // 优先级（数字越小越优先）
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  logs          AILog[]
+}
+
+// AI 调用日志
+model AILog {
+  id              String    @id @default(uuid())
+  aiConfigId      String
+  messageSetId    String    // 触发的信息集ID
+  messageContent  String    // 触发的信息集内容摘要
+  aiResponse      String?   // AI 回复内容
+  status          String    // success / failed
+  errorMessage    String?   // 错误信息
+  duration        Int?      // 响应时间（毫秒）
+  createdAt       DateTime  @default(now())
+
+  aiConfig        AIConfig  @relation(fields: [aiConfigId], references: [id], onDelete: Cascade)
+
+  @@index([aiConfigId, createdAt]) // 优化查询
+}
+
+// 泡泡阅读状态
+model BubbleReadStatus {
+  id            String    @id @default(uuid())
+  userId        String
+  messageSetId  String
+  hasRead       Boolean   @default(false)  // 是否已阅读
+  hasCommented  Boolean   @default(false)  // 是否已评论
+  readAt        DateTime? // 阅读时间
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageSet    MessageSet @relation(fields: [messageSetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageSetId]) // 每个用户对每个泡泡只有一条记录
+  @@index([userId, hasRead]) // 优化查询：用户的未读泡泡
+}
+
+// 旅人录 - 用户公开卡片
+model TravelerRecord {
+  id            String    @id @default(uuid())
+  userId        String    @unique
+  travelerId    String?   @unique // 旅人ID（随机数字编号，进入集会后生成）
+  title         String    // 称号 (2-20字)
+  description   String?   // 描述 (0-200字)
+  isPublic      Boolean   @default(true) // 是否在集会展示
+  titleBanned   Boolean   @default(false) // 称号是否被封禁
+  descBanned    Boolean   @default(false) // 描述是否被封禁
+  titleBanCount Int       @default(0) // 称号被封禁次数
+  descBanCount  Int       @default(0) // 描述被封禁次数
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  banHistory    TravelerBanHistory[]
+
+  @@index([isPublic]) // 优化查询：公开的旅人录
+  @@index([travelerId]) // 优化查询：旅人ID
+}
+
+// 旅人录封禁历史
+model TravelerBanHistory {
+  id            String    @id @default(uuid())
+  recordId      String    // 旅人录ID
+  banType       String    // title / desc
+  originalContent String  // 被封禁的原始内容
+  adminId       String    // 执行封禁的管理员ID
+  createdAt     DateTime  @default(now())
+
+  record        TravelerRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([recordId, createdAt]) // 优化查询
+}
+
+// 称号词库 - 形容词
+model TitleAdjective {
+  id            String    @id @default(uuid())
+  word          String    @unique
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+}
+
+// 称号词库 - 名词
+model TitleNoun {
+  id            String    @id @default(uuid())
+  word          String    @unique
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
 }
