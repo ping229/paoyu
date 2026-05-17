@@ -5,13 +5,10 @@ import Link from "next/link";
 
 export default function Nav() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [username, setUsername] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    const user = localStorage.getItem("username");
     setIsLoggedIn(!!token);
-    setUsername(user || "");
   }, []);
 
   const handleLogout = () => {
@@ -58,7 +55,7 @@ export default function Nav() {
                 href="/space"
                 className="text-purple-400 hover:text-purple-300 text-sm font-medium"
               >
-                {username}
+                个人空间
               </Link>
               <button
                 onClick={handleLogout}
